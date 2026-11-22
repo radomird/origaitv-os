@@ -401,6 +401,9 @@ export class Daemon {
   // the record before the last answer came doesn't ask again.
   private themesAsked = new Set<string>();
   private buildsSeen = "";
+  // The daemon's first look at the builds, taken as it starts. Every later
+  // look waits for it, so it's what they compare with.
+  private buildsLooked?: Promise<void>;
   private buildsTimer?: ReturnType<typeof setInterval>;
   private buildAwake: { set(on: boolean): void };
   // What home's Chromium reaches the internet through.
@@ -708,14 +711,16 @@ export class Daemon {
   }
 
   listen(): Promise<number> {
-    // The builds, looked at every two seconds: the TV and the phones hear
-    // when one moves on.
+    // The builds, looked at once now, before any page or phone can ask, and
+    // then every two seconds: the TV and the phones hear when one moves on.
+    this.buildsLooked ??= this.firstBuildsLook();
     this.buildsTimer = setInterval(() => void this.watchBuilds(), 2000);
     this.buildsTimer.unref();
     void this.fetchAiCli("the daemon started");
     const lan = this.lan;
     const captive = this.captive;
     const phones = Promise.all([
+      this.buildsLooked,
       lan ? new Promise<void>((resolve) => lan.listen(this.options.lanPort, this.options.lanHost ?? "0.0.0.0", () => resolve())) : null,
       captive ? new Promise<void>((resolve) => captive.listen(this.options.setupPort, this.options.setupHost ?? "0.0.0.0", () => resolve())) : null,
       this.homeProxy?.listen(this.options.homeProxyPort, "127.0.0.1"),
@@ -818,16 +823,29 @@ export class Daemon {
   // --- The builder (ADR-011, ADR-043 to ADR-046) ---------------------------
 
   private async watchBuilds(): Promise<void> {
+    await this.buildsLooked;
     // A build waiting for its plan's sign-in gets one, and goes on after it,
     // and a streaming service's app learns the rest once it's signed in.
     await this.builds.tend({ signedIn: (id) => this.home.isSignedIn(id) }).catch(() => false);
     await this.tendThemes().catch(() => {});
-    const now = JSON.stringify([await this.builds.list().catch(() => []), await this.madeApplied()]);
+    const now = await this.buildsNow();
     if (now === this.buildsSeen) return;
     this.buildsSeen = now;
     this.broadcast("builds", {});
     // A build keeps the box awake while it runs (ADR-072).
     this.buildAwake.set(await this.builds.running().catch(() => false));
+  }
+
+  // The first look, as the daemon starts: what the builds are now, kept to
+  // compare with, and said to no one. Nothing has moved on yet, and no page
+  // or phone has asked for the builds before this.
+  private async firstBuildsLook(): Promise<void> {
+    this.buildsSeen = await this.buildsNow();
+    this.buildAwake.set(await this.builds.running().catch(() => false));
+  }
+
+  private async buildsNow(): Promise<string> {
+    return JSON.stringify([await this.builds.list().catch(() => []), await this.madeApplied()]);
   }
 
   private async buildsState() {
