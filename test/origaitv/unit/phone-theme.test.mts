@@ -205,9 +205,12 @@ test("T29.1 the count goes up once when the theme changes, a phone that was wait
     const sixth = await phone.json("GET", "/api/phone/state");
     assert.deepEqual([sixth.version, sixth.theme], [fifth.version, fifth.theme]);
 
-    // Something else changing doesn't touch the theme.
-    assert.equal((await fetch(`${url}/api/backgrounds`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: "field" }) })).status, 200);
-    assert.deepEqual((await phone.json("GET", "/api/phone/state")).theme, fifth.theme);
+    // Something else changing, such as one more phone, raises the count
+    // and leaves the theme as it is.
+    await pairPhone(lan, daemon.phones.code().code, "a third");
+    const seventh = await phone.json("GET", "/api/phone/state");
+    assert.notEqual(seventh.version, fifth.version);
+    assert.deepEqual(seventh.theme, fifth.theme);
   } finally {
     await reader.cancel().catch(() => {});
     await daemon.close();
