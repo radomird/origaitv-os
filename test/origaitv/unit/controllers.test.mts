@@ -3,11 +3,12 @@
 // check's count following a change.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { AskWatch } from "../../../daemon/asks.ts";
+import { PHONE_PAD, readPads } from "../../../daemon/box.ts";
 import { cleanAnswer, cleanName, Controllers, isController, listed, parseObjects, typesOrPoints, type ControllerAnswer, type ControllerAsk } from "../../../daemon/controllers.ts";
 import { Daemon } from "../../../daemon/server.ts";
 import { DUALSENSE, HEADPHONES, KEYBOARD, StandInBluez, XBOX } from "../fixtures/controllers/bluez.mts";
@@ -478,6 +479,61 @@ test("T16.1 the box check's count follows a controller that's paired and one tha
   const keyboard = (await send("POST", "/api/controllers/pair", { id: KEYBOARD.address })).data;
   assert.deepEqual([keyboard.ok, keyboard.why], [false, "not-a-controller"]);
   await send("POST", "/api/controllers/look", { on: false });
+});
+
+// An input device where the kernel keeps it, with the link to it that
+// /sys/class/input has: a real one under the port it's plugged into, and
+// one a program made under devices/virtual.
+function device(event: string, dev: string, name: string, bus: string, under: string): () => void {
+  const number = event.replace("event", "input");
+  const at = `sys/devices/${under}/${number}/${event}`;
+  put(`${at}/dev`, `${dev}\n`);
+  put(`${at}/device/name`, `${name}\n`);
+  put(`${at}/device/id/bustype`, `${bus}\n`);
+  put(`run/udev/data/c${dev}`, "E:ID_INPUT=1\nE:ID_INPUT_JOYSTICK=1\n");
+  symlinkSync(join("../../devices", under, number, event), join(tree, "sys/class/input", event));
+  return () => {
+    rmSync(join(tree, "sys/class/input", event), { force: true });
+    rmSync(join(tree, "sys/devices", under.split("/")[0]), { recursive: true, force: true });
+    rmSync(join(tree, `run/udev/data/c${dev}`), { force: true });
+  };
+}
+
+test("T29.3 a phone in game mode isn't listed as a controller on a cable, and nothing real is taken for one", async () => {
+  const USB = "pci0000:00/0000:00:14.0/usb1/1-2/1-2:1.0/input";
+  const WIRED = "8BitDo Pro 2 Wired Controller";
+  assert.equal(PHONE_PAD, /^PAD_NAME = b"(.+)"$/m.exec(readFileSync(join(ROOT, "daemon/input.py"), "utf8"))?.[1], "the name the input helper gives it");
+  const listed = async () => (await send("GET", "/api/controllers")).data.usb;
+  assert.deepEqual(await listed(), [WIRED]);
+
+  // The phone's: made by the input helper, so the kernel keeps it with the
+  // devices that aren't hardware. It says it's on USB, with its own name.
+  const phone = device("event80", "13:84", PHONE_PAD, "0003", "virtual/input");
+  assert.deepEqual(await readPads(tree), [{ name: WIRED, bus: "usb" }, { name: PHONE_PAD, bus: "usb", phone: true }]);
+  assert.deepEqual(await listed(), [WIRED], "the real one, and not the phone's");
+  // A second phone is no different.
+  const second = device("event81", "13:85", PHONE_PAD, "0003", "virtual/input");
+  assert.deepEqual(await listed(), [WIRED]);
+  second();
+  phone();
+
+  // A real controller that calls itself the same is still a real one: it's
+  // under the port it's plugged into.
+  const namesake = device("event82", "13:86", PHONE_PAD, "0003", USB);
+  assert.deepEqual(await readPads(tree), [{ name: WIRED, bus: "usb" }, { name: PHONE_PAD, bus: "usb" }]);
+  assert.deepEqual(await listed(), [WIRED, PHONE_PAD]);
+  namesake();
+  // So is a controller another program made, under its own name.
+  const other = device("event83", "13:87", "Some Virtual Gamepad", "0003", "virtual/input");
+  assert.deepEqual(await listed(), [WIRED, "Some Virtual Gamepad"]);
+  other();
+  // And a name that only starts the same, or differs in a capital.
+  for (const name of [`${PHONE_PAD} 2`, PHONE_PAD.toLowerCase()]) {
+    const near = device("event84", "13:88", name, "0003", "virtual/input");
+    assert.deepEqual(await listed(), [WIRED, name]);
+    near();
+  }
+  assert.deepEqual(await listed(), [WIRED], "and it's as it was");
 });
 
 test("T16.1 with a PIN set, pairing, removing and turning Bluetooth on need its grant, and a child's profile can still see the list", async () => {
