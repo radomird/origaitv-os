@@ -39,13 +39,28 @@ export interface FitOptions {
   moved?(): void;
 }
 
+// The steps being saved, kept outside any one drawing of the screen. Each
+// step the TV takes makes it tell the pages the display changed, and the
+// page in front is drawn again, with a new fitParts. That one is handed the
+// margin the TV had kept last, which is behind the one on screen while steps
+// are still on their way. So while one is out, a new drawing starts from
+// what was shown, and the steps go on being saved in order, one at a time.
+interface Steps {
+  shown: number;
+  saved: number;
+  saving: boolean;
+  wanted: number | null;
+  // The drawing in front now, which hears how a save went.
+  drawn: { draw(): void; save: FitOptions["save"]; failed: FitOptions["failed"] };
+}
+let steps: Steps | null = null;
+
+// Whether steps are still on their way to the TV.
+const busy = (at: Steps | null): at is Steps => at !== null && (at.saving || at.wanted !== null);
+
 export function fitParts(o: FitOptions): FitParts {
-  let shown = o.margin;
-  let saved = o.margin;
-  // One save at a time. Steps taken while one is out are saved after it,
-  // the last one only.
-  let saving = false;
-  let wanted: number | null = null;
+  const at: Steps = busy(steps) ? steps : { shown: o.margin, saved: o.margin, saving: false, wanted: null, drawn: { draw: () => {}, save: o.save, failed: o.failed } };
+  steps = at;
 
   const marks = h(
     "div",
@@ -56,47 +71,51 @@ export function fitParts(o: FitOptions): FitParts {
   const size = h("button", { class: "button fit-size", "data-focus": true, "data-action": "fit-size", "data-adjust": "fit" }, h("span", {}, "Picture size"), value);
 
   const draw = () => {
-    const at = margins(shown, o.canvas);
-    marks.style.setProperty("--mark-x", `${at.x}px`);
-    marks.style.setProperty("--mark-y", `${at.y}px`);
+    const shown = at.shown;
+    const where = margins(shown, o.canvas);
+    marks.style.setProperty("--mark-x", `${where.x}px`);
+    marks.style.setProperty("--mark-y", `${where.y}px`);
     marks.classList.toggle("none", shown === 0);
     value.textContent = shown === 0 ? "Whole screen" : `${pictureSize(shown)}%`;
     size.classList.toggle("smallest", steppedMargin(shown, -1) === null);
     size.classList.toggle("biggest", steppedMargin(shown, 1) === null);
     o.moved?.();
   };
-
-  const send = async () => {
-    if (saving || wanted === null) return;
-    saving = true;
-    const margin = wanted;
-    wanted = null;
-    const answer = await o.save(margin);
-    saving = false;
-    if (answer.state) saved = answer.state.margin;
-    else {
-      wanted = null;
-      shown = saved;
-      draw();
-      o.failed(answer.error ?? "Couldn't change the picture size");
-      return;
-    }
-    void send();
-  };
+  at.drawn = { draw, save: o.save, failed: o.failed };
 
   draw();
   return {
     marks,
     size,
-    margin: () => shown,
+    margin: () => at.shown,
     step(by) {
-      const next = steppedMargin(shown, by);
+      const next = steppedMargin(at.shown, by);
       if (next === null) return false;
-      shown = next;
-      wanted = next;
+      at.shown = next;
+      at.wanted = next;
       draw();
-      void send();
+      void send(at);
       return true;
     },
   };
+}
+
+// Saves the last step taken, once the one before it is saved. A step that
+// fails puts the screen back to what the TV kept.
+async function send(at: Steps): Promise<void> {
+  if (at.saving || at.wanted === null) return;
+  at.saving = true;
+  const margin = at.wanted;
+  at.wanted = null;
+  const answer = await at.drawn.save(margin);
+  at.saving = false;
+  if (answer.state) at.saved = answer.state.margin;
+  else {
+    at.wanted = null;
+    at.shown = at.saved;
+    at.drawn.draw();
+    at.drawn.failed(answer.error ?? "Couldn't change the picture size");
+    return;
+  }
+  void send(at);
 }

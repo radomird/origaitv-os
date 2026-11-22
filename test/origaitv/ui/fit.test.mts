@@ -191,6 +191,49 @@ for (const look of LOOKS) {
   });
 }
 
+test("T22.1 quick presses on Fit to screen all count: each step's save draws the page again, and the page keeps the size it shows", async () => {
+  // Every step the TV takes makes the page in front draw again, from the
+  // margin the TV kept last. Pressed quickly, that's behind the one on
+  // screen, and the size used to jump back a step or two.
+  await fetch(`${url}/api/look`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ look: "glass" }) });
+  for (const gap of [5, 10, 15]) {
+    await put({ size: "standard", margin: 4 });
+    const page = await tv([1920, 1080]);
+    try {
+      await go(page, "fit");
+      await page.waitForSelector(".fit-screen .fit-size.focused");
+      await settled(page);
+      assert.equal(await page.locator(".fit-value").innerText(), "92%");
+      // Each size the page shows, as it shows it, so a jump back is seen.
+      await page.evaluate(() => {
+        const w = window as unknown as { fitSeen: string[] };
+        w.fitSeen = [];
+        new MutationObserver(() => {
+          const now = document.querySelector(".fit-value")?.textContent ?? "";
+          if (now !== w.fitSeen.at(-1)) w.fitSeen.push(now);
+        }).observe(document.body, { subtree: true, childList: true, characterData: true });
+      });
+      for (let i = 0; i < 10; i++) {
+        await page.keyboard.press("ArrowRight");
+        await page.waitForTimeout(gap);
+      }
+      await page.waitForFunction(() => document.querySelector(".fit-value")?.textContent === "Whole screen", undefined, { timeout: 5000 }).catch(async () => {
+        assert.fail(`${gap} ms between presses: ten presses from 92% ended on ${await page.locator(".fit-value").innerText()}, not the whole screen`);
+      });
+      assert.equal(await kept(0), 0, `${gap} ms between presses: the TV keeps the whole screen`);
+      const seen = (await page.evaluate(() => (window as unknown as { fitSeen: string[] }).fitSeen)).map((one) => (one === "Whole screen" ? 100 : parseInt(one, 10)));
+      assert.ok(
+        seen.every((size, i) => i === 0 || size >= seen[i - 1]),
+        `${gap} ms between presses: the size only ever went up, but the page showed ${seen.join(", ")}`,
+      );
+      assert.equal(await page.locator(".fit-value").innerText(), "Whole screen", "and it stays there");
+    } finally {
+      await page.close();
+    }
+  }
+  await put({ size: "standard", margin: 3 });
+});
+
 test("T22.1 home's own margin follows Fit to screen's, only past the 3 percent it already allows for", async () => {
   const safe = (page: Page) =>
     page.evaluate(() => {
