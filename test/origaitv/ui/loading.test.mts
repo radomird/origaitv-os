@@ -151,8 +151,18 @@ test("T17.1 a look's preview never says it's loading, and reduce motion keeps th
     assert.equal(await page.locator(".loading-mark").count(), 0);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await home(page, url);
-    await page.waitForSelector(`${WEATHER} .loading-mark i`);
-    assert.equal(await page.locator(`${WEATHER} .loading-mark i`).first().evaluate((el) => getComputedStyle(el).animationName), "none");
+    // Home draws once more about two seconds after the daemon starts, and
+    // a mark found before that draw is off the page by the time it's read,
+    // with no animation name at all. So the mark is found and read in one
+    // go, in the page, once it's there.
+    const animation = await page
+      .waitForFunction((selector) => {
+        const dot = document.querySelector(`${selector} .loading-mark i`);
+        return dot ? getComputedStyle(dot).animationName : null;
+      }, WEATHER, { timeout: 5_000 })
+      .then((found) => found.jsonValue())
+      .catch((error) => assert.fail(`Weather's tile had no loading mark on home in 5000 ms: ${(error as Error).message}`));
+    assert.equal(animation, "none", "with reduce motion the mark keeps still");
   } finally {
     await close();
   }
