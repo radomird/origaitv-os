@@ -80,7 +80,8 @@ function said(offer: AiInfo["offers"][Provider], now: PlanSignIn | null): string
 }
 
 // The ways in for one provider: its plan, signed in right here, a key from
-// the phone, or later. Once its plan is picked and the terms are accepted,
+// the phone, or later. Once the plan is signed in, setup moves on by itself,
+// and the TV says so too, so a phone that finished it moves the TV on. Once its plan is picked and the terms are accepted,
 // the sign-in starts by itself, and its link shows as a QR code. Then the
 // code to scan and the steps sit together in the middle (ADR-103, Q314):
 // scan it, sign in, and paste the code back or enter the one shown, with
@@ -101,6 +102,11 @@ export function ways(ctx: Ctx, provider: Provider): View {
   let timer = 0;
   let moved = false;
   let shown = "";
+  // Setup moves on by itself only for a sign-in that finished while this
+  // screen watched. Back here once it's done, Continue goes on instead, so
+  // Back from the next step stays here.
+  let watched = false;
+  let stopped = false;
 
   const draw = () => {
     // The code to enter keeps its capitals.
@@ -126,8 +132,15 @@ export function ways(ctx: Ctx, provider: Provider): View {
     // While it signs in, the plan is in use: its button goes, and the focus
     // with it, to the next way in.
     const on = ctx.focus.get();
-    plan?.classList.toggle("hidden", Boolean(url));
-    if (url && on && on === plan) ctx.focus.set(keyButton);
+    const signedIn = Boolean(now?.signedIn);
+    plan?.classList.toggle("hidden", Boolean(url) || signedIn);
+    // Continue is there only once it's signed in.
+    if (signedIn) options.prepend(go);
+    else go.remove();
+    keyButton.classList.toggle("hidden", signedIn);
+    later.classList.toggle("hidden", signedIn);
+    if (signedIn && on && on !== go && connect.contains(on)) ctx.focus.set(go);
+    else if (url && on && on === plan) ctx.focus.set(keyButton);
     // The field takes the focus as it shows, so the phone's keyboard opens
     // by itself and its paste goes straight in: no mouse needed (ADR-103).
     // Not from under the PIN's pad, which has the keys while it's up.
@@ -141,8 +154,11 @@ export function ways(ctx: Ctx, provider: Provider): View {
     } catch {
       return;
     }
+    // Setup moved on already, as the TV does once the sign-in is done.
+    if (stopped) return;
     draw();
-    if (now?.signedIn && !moved) {
+    if (!now?.signedIn) watched = true;
+    else if (watched && !moved) {
       moved = true;
       clearInterval(timer);
       ctx.sounds.play("confirm");
@@ -164,6 +180,7 @@ export function ways(ctx: Ctx, provider: Provider): View {
       const started = await ctx.guarded("signing in", (grant) => setup.startSignIn(grant));
       if (!started) return;
       now = started.value.signIn;
+      if (!now?.signedIn) watched = true;
     } catch (error) {
       ctx.toast((error as Error).message, "fail");
       ctx.sounds.play("failure");
@@ -226,6 +243,7 @@ export function ways(ctx: Ctx, provider: Provider): View {
   const plan = offer.plan.offered ? h("button", { class: "button primary", "data-focus": true, "data-path": "plan", onclick: () => void choose("plan") }, "Use my plan") : null;
   const keyButton = h("button", { class: `button${plan ? "" : " primary"}`, "data-focus": true, "data-path": "key", onclick: () => void choose("key") }, "Use an API key");
   const later = h("button", { class: "button", "data-focus": true, "data-action": "later", onclick: () => void ctx.finish("ai") }, "Later");
+  const go = h("button", { class: "button primary", "data-focus": true, "data-action": "continue", onclick: () => void ctx.finish("ai") }, "Continue");
   const options = h("div", { class: "ai-options" }, ...(plan ? [plan] : []), keyButton, later);
   lastStep.append(paste);
   const connect = h("div", { class: "ai-connect" }, qrBox, h("div", { class: "ai-side" }, steps, options));
@@ -238,10 +256,15 @@ export function ways(ctx: Ctx, provider: Provider): View {
   if (ai.provider === provider && ai.path === "plan" && ai.accepted) {
     void setup.signIn().then(
       (answer) => {
+        if (stopped) return;
         now = answer.signIn;
         draw();
-        if (now?.signedIn) void look();
-        else if (!now || now.now?.state === "failed") void start();
+        if (now?.signedIn) {
+          if (go.isConnected) ctx.focus.set(go);
+          return;
+        }
+        watched = true;
+        if (!now || now.now?.state === "failed") void start();
         else follow();
       },
       () => {},
@@ -253,6 +276,9 @@ export function ways(ctx: Ctx, provider: Provider): View {
     first: plan ?? keyButton,
     info: info(ctx),
     back: () => again(ctx),
-    stop: () => clearInterval(timer),
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+    },
   };
 }
