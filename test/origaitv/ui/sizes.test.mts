@@ -228,7 +228,7 @@ test("T4.1 on a 4K TV, Settings puts it on 1080p output and back, and the sizes 
   }
 });
 
-test("T4.1 setup's look step offers the TV's sizes under the looks, and each look's preview follows the size", async () => {
+test("T4.1 T30.8 setup's look step offers normal and large under the looks, normal picked, and each look's preview follows the size", async () => {
   await put("/api/display", { size: "standard" });
   const at = new Date().toISOString();
   const finished = Object.fromEntries(["welcome", "ready", "country", "ai", "people", "goal", "apps"].map((step) => [step, at]));
@@ -239,14 +239,16 @@ test("T4.1 setup's look step offers the TV's sizes under the looks, and each loo
     await page.goto(`${url}/`);
     await page.waitForSelector(".setup-look .look-card.focused");
     const chips = () => page.$$eval(".setup-look-sizes .chip", (els) => els.map((el) => `${el.textContent?.trim()}${el.classList.contains("picked") ? " *" : ""}`));
-    assert.deepEqual(await chips(), ["Larger", "Standard *", "More on screen"]);
+    // A 4K TV offers three sizes. Setup offers two: more on screen waits in
+    // Settings.
+    assert.deepEqual(await chips(), ["Normal *", "Large"]);
     const previews = () => page.$$eval(".setup-look .look-frame-page", (els) => els.map((el) => new URL((el as HTMLIFrameElement).src).searchParams.get("size")));
     assert.deepEqual(await previews(), ["standard", "standard", "standard"]);
-    await page.locator('.setup-look-sizes [data-action="size-more"]').click();
-    await page.waitForFunction(() => document.querySelector('.setup-look-sizes [data-action="size-more"]')?.classList.contains("picked"));
-    assert.deepEqual(await chips(), ["Larger", "Standard", "More on screen *"]);
-    assert.deepEqual(await previews(), ["more", "more", "more"], "each look's preview is home at more on screen");
-    assert.equal(((await (await fetch(`${url}/api/display`)).json()) as { size: string }).size, "more");
+    await page.locator('.setup-look-sizes [data-action="size-larger"]').click();
+    await page.waitForFunction(() => document.querySelector('.setup-look-sizes [data-action="size-larger"]')?.classList.contains("picked"));
+    assert.deepEqual(await chips(), ["Normal", "Large *"]);
+    assert.deepEqual(await previews(), ["larger", "larger", "larger"], "each look's preview is home at large");
+    assert.equal(((await (await fetch(`${url}/api/display`)).json()) as { size: string }).size, "larger");
     assert.equal(((await (await fetch(`${url}/api/setup`)).json()) as { setup: { step: string } }).setup.step, "look", "picking a size stays on the step");
   } finally {
     await page.close();

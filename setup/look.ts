@@ -2,8 +2,8 @@
 // Glass and Cinema by name down the left, and home in the focused one on the
 // right, drawn by the launcher itself in a frame. OK on a name picks it and
 // goes on to Fit to screen (setup/fit.ts), then the theme, step 11 of 12.
-// Under the preview, with the sizes switch on, the TV's sizes (ADR-062): OK
-// on one sets it, and the preview shows home at it. Where the TV has
+// Under the preview, with the sizes switch on, two sizes, normal and large
+// (ADR-062): OK on one sets it, and the preview shows home at it. Where the TV has
 // nothing of its own yet, the preview fills in with open movies
 // (launcher/looks/showcase.ts).
 // Settings → Themes and backgrounds changes both any time.
@@ -15,6 +15,10 @@ import { loadSizes, setSize, SIZE_NAMES } from "../launcher/size.ts";
 import { NEEDS_PIN } from "./api.ts";
 import { heading } from "./frame.ts";
 import type { Ctx, View } from "./main.ts";
+
+// Setup's two sizes, in the order they show, and what each is called.
+const SETUP_SIZES: SizeId[] = ["standard", "larger"];
+const SETUP_SIZE_NAMES: Partial<Record<SizeId, string>> = { standard: "Normal", larger: "Large" };
 
 // The preview's width, as D3 has it: home at 58 percent.
 const PREVIEW_WIDTH = 1114;
@@ -75,16 +79,18 @@ export async function look(ctx: Ctx): Promise<View> {
     for (const frame of stage.children) (frame as HTMLElement).classList.toggle("on", (frame as HTMLElement).dataset.preview === id);
   };
 
-  // The sizes this TV offers, the one it's at marked. None with the sizes
-  // off, or on a TV that offers one.
+  // Two sizes to pick from here, normal and large, the one the TV is at
+  // marked: normal to start with. More on screen waits in Settings. None
+  // with the sizes off, or on a TV that offers one.
   let display = await loadSizes();
   const sizesBox = h("div", { class: "setup-look-sizes", "data-sizes": "" });
+  const offered = () => SETUP_SIZES.filter((one) => display?.sizes.includes(one));
   const drawSizes = () => {
-    if (!display || display.sizes.length < 2) return sizesBox.replaceChildren();
+    if (!display || offered().length < 2) return sizesBox.replaceChildren();
     const at = display.size;
     sizesBox.replaceChildren(
       h("span", { class: "setup-look-sizes-label" }, "Size"),
-      ...display.sizes.map((one) => h("button", { class: `chip${one === at ? " picked" : ""}`, "data-focus": true, "data-action": `size-${one}`, onclick: () => void pickSize(one) }, SIZE_NAMES[one])),
+      ...offered().map((one) => h("button", { class: `chip${one === at ? " picked" : ""}`, "data-focus": true, "data-action": `size-${one}`, onclick: () => void pickSize(one) }, SETUP_SIZE_NAMES[one])),
     );
   };
   const pickSize = async (one: SizeId) => {
@@ -103,7 +109,7 @@ export async function look(ctx: Ctx): Promise<View> {
     const set = asked.value;
     if (!set.state) {
       ctx.sounds.play("failure");
-      ctx.toast(set.error ?? `Couldn't use ${SIZE_NAMES[one]}`, "fail");
+      ctx.toast(set.error ?? `Couldn't use ${SETUP_SIZE_NAMES[one] ?? SIZE_NAMES[one]}`, "fail");
       return;
     }
     display = set.state;
