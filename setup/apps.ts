@@ -83,7 +83,21 @@ export function installLine(apps: Installs, names: Record<string, string>): stri
     return all.length > 1 ? `${all.slice(0, -1).join(", ")} and ${all[all.length - 1]}` : all[0];
   };
   if (going.length) return `Installing ${which(going)}`;
-  if (failed.length) return `${COULDNT_INSTALL}${which(failed)}`;
+  if (!failed.length) return null;
+  // Then why, when they all didn't install for the same reason the TV gave:
+  // "Couldn't install Steam. Update your TV". Settings' row has the whole
+  // reason.
+  const reasons = failed.map((id) => reasonFor(apps[id].error));
+  const reason = reasons.every((one) => one && one === reasons[0]) ? reasons[0] : null;
+  return `${COULDNT_INSTALL}${which(failed)}${reason ? `. ${reason}` : ""}`;
+}
+
+// What to do about an app that didn't install, in a few words, from the
+// TV's own reason: its lists are newer than the system, or it's offline.
+function reasonFor(error: string | undefined): string | null {
+  if (!error) return null;
+  if (/update your tv/i.test(error)) return "Update your TV";
+  if (/internet/i.test(error)) return "Check your internet";
   return null;
 }
 

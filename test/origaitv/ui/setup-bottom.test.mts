@@ -220,3 +220,37 @@ test("T30.7 the bar names one app that didn't install, and says Claude is ready 
     await page.close();
   }
 });
+
+test("T30.7 the bar says why the apps didn't install, after which ones, and the reason shows in full for one", async () => {
+  const said = (apps: Record<string, unknown>) => (daemon as unknown as { broadcast(event: string, data: unknown): void }).broadcast("setup-apps", apps);
+  const update = (name: string) => ({ state: "failed", error: `Couldn't install ${name}. Update your TV in Settings, under Updates, then try again.` });
+  // On Pick a look, one game with the TV's reason fits on one line, in
+  // full.
+  let page = await at("look", [1920, 1080]);
+  try {
+    said({ "origaitv.steam": update("Steam") });
+    await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't install Steam. Update your TV");
+    assert.deepEqual(await crowded(page), []);
+    assert.ok(await startShows(page, "Couldn't install Steam. Update your TV"), "the reason shows in full");
+    // Offline, it says to check the internet.
+    said({ "origaitv.steam": { state: "failed", error: "Couldn't download Steam. Check your internet, then try again." } });
+    await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't install Steam. Check your internet");
+    assert.ok(await startShows(page, "Couldn't install Steam. Check your internet"), "the reason shows in full");
+  } finally {
+    await page.close();
+  }
+  // On Pick a theme, next to the longest step: three for the same reason,
+  // which ones first, then why, cut short as it must be.
+  page = await at("theme", [1920, 1080]);
+  try {
+    said({ "origaitv.steam": update("Steam"), "origaitv.battlenet": update("Battle.net"), "origaitv.retroarch": update("RetroArch") });
+    await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't install Steam, Battle.net and RetroArch. Update your TV");
+    assert.deepEqual(await crowded(page), []);
+    assert.ok(await startShows(page, "Couldn't install Steam"), "what didn't install shows first");
+    // Two reasons: no reason given, rather than the wrong one.
+    said({ "origaitv.steam": update("Steam"), "origaitv.retroarch": { state: "failed", error: "Couldn't download RetroArch. Check your internet, then try again." } });
+    await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't install Steam and RetroArch");
+  } finally {
+    await page.close();
+  }
+});
