@@ -1,8 +1,10 @@
 // Getting ready (board 35, ADR-025, S5.6): once the box is online it brings
 // itself up to date first, so every screen after this one comes from the
 // newest release. It asks the screen daemon for the update check, and when
-// there's a newer OrigaiTV or Omarchy, for the same install Settings → Updates
-// runs. The install restarts OrigaiTV, so this page loads again from the new
+// there's a newer OrigaiTV or Omarchy, or any system update waiting, for the
+// same install Settings → Updates runs: a backup, the packages, migrations,
+// and a restart for a new kernel. A fresh box from an older stick needs the
+// system's packages new too, or the games picked later won't install. The install restarts OrigaiTV, so this page loads again from the new
 // release and carries on here; one that needs the box to restart comes back
 // here after it. A check or an install that doesn't work doesn't hold setup
 // up: it carries on with the version it has, and Settings → Updates has the
@@ -37,6 +39,10 @@ function versions(from: string | null, to: string | null): [string, string] {
 }
 
 const fresh = (at: string | undefined, asked: string | null) => Boolean(at && asked && Date.parse(at) >= Date.parse(asked) - 2000);
+
+// Whether the update brings another OrigaiTV, rather than the system's
+// packages alone.
+const moves = (r: SetupInfo["setup"]["ready"]) => Boolean(r.to && bare(r.to) !== bare(r.from));
 
 // A row of the checklist. A network's name comes as its own piece, so it
 // keeps its capitals.
@@ -104,8 +110,9 @@ export function ready(ctx: Ctx, phase2 = false): View {
     if (!about.network.online || r.update === null || r.update === "checking") rows.push(row(">", "Checking for updates"));
     else if (r.update === "installing") {
       const now = fresh(progress?.at, r.asked) ? progress : null;
-      rows.push(now?.state === "restarting" ? row(">", `OrigaiTV ${to} · restarting`) : row(">", `OrigaiTV ${from} to ${to}`, blocks(now?.percent ?? 0)));
-    } else if (r.update === "done") rows.push(row("x", `OrigaiTV ${to}`));
+      const what = moves(r) ? `OrigaiTV ${from} to ${to}` : "System updates";
+      rows.push(now?.state === "restarting" ? row(">", moves(r) ? `OrigaiTV ${to} · restarting` : "System updates · restarting") : row(">", what, blocks(now?.percent ?? 0)));
+    } else if (r.update === "done") rows.push(row("x", moves(r) ? `OrigaiTV ${to}` : "System updates"));
     else if (r.update === "none") rows.push(row("x", `OrigaiTV ${from} · up to date`));
     else if (r.update === "failed") rows.push(row("!", `OrigaiTV ${from} · couldn't update`));
     else rows.push(row("x", `OrigaiTV ${from} · update later in Settings`));
@@ -142,10 +149,10 @@ export function ready(ctx: Ctx, phase2 = false): View {
     else if (r.update === "installing") {
       const now = fresh(progress?.at, r.asked) ? progress : null;
       percent = now?.percent ?? 0;
-      line.textContent = now?.state === "restarting" ? `OrigaiTV ${to} installed. Restarting…` : `Updating OrigaiTV ${from} to ${to}`;
+      line.textContent = now?.state === "restarting" ? "Restarting your TV…" : "Updating your TV. It can take a few minutes and restart once.";
     } else {
       percent = 100;
-      line.textContent = r.update === "done" ? `OrigaiTV ${to} is ready` : r.update === "failed" ? "Couldn't update. Try later in Settings." : `OrigaiTV ${from} is up to date`;
+      line.textContent = r.update === "done" ? (moves(r) ? `OrigaiTV ${to} is ready` : "Your TV is up to date") : r.update === "failed" ? "Couldn't update. Try later in Settings." : `OrigaiTV ${from} is up to date`;
     }
     list.replaceChildren(blocks(percent));
     if (!finished) ran = true;
@@ -185,21 +192,26 @@ export function ready(ctx: Ctx, phase2 = false): View {
           const reply = await screen.checkUpdates();
           if (!reply.ok) about.setup = await setup.ready({ update: "failed" });
         } else if (status && fresh(status.checked_at, r.asked)) {
-          const newer = status.ok && !status.waiting && Boolean(status.origaitv.available || status.omarchy.available);
+          const newer = status.ok && !status.waiting && Boolean(status.origaitv.available || status.omarchy.available || status.packages > 0);
           if (!status.ok) about.setup = await setup.ready({ update: "failed", from: status.origaitv.installed ?? r.from });
           else if (!newer) about.setup = await setup.ready({ update: "none", from: status.origaitv.installed ?? about.running, to: status.origaitv.installed ?? about.running });
           else {
-            about.setup = await setup.ready({ update: "installing", from: status.origaitv.installed ?? about.running, to: status.origaitv.available ?? status.origaitv.installed });
+            about.setup = await setup.ready({ update: "installing", from: status.origaitv.installed ?? about.running, to: status.origaitv.available ?? status.origaitv.installed ?? about.running });
             const reply = await screen.installUpdate("");
             if (!reply.ok) about.setup = await setup.ready({ update: "failed" });
           }
         } else if (r.asked && Date.now() - Date.parse(r.asked) > CHECK_MS) about.setup = await setup.ready({ update: "failed" });
       } else if (r.update === "installing") {
+        const now = progress && fresh(progress.at, r.asked) ? progress : null;
         // The daemon restarted on the new package, as the install does at its
-        // end: it's in.
-        if (r.to && about.running === r.to) about.setup = await setup.ready({ update: "done" });
-        else if (progress && fresh(progress.at, r.asked) && progress.state === "failed") about.setup = await setup.ready({ update: "failed" });
-        else if (progress && fresh(progress.at, r.asked) && progress.state === "done") about.setup = await setup.ready({ update: "done" });
+        // end: it's in. An update of the system's packages alone leaves
+        // OrigaiTV's version as it was, so only the install's own word says
+        // it's done, and a box that restarted for a new kernel comes back
+        // with the install still saying it's restarting.
+        if (moves(r) && about.running === r.to) about.setup = await setup.ready({ update: "done" });
+        else if (now?.state === "failed") about.setup = await setup.ready({ update: "failed" });
+        else if (now?.state === "done") about.setup = await setup.ready({ update: "done" });
+        else if (now?.state === "restarting" && Date.parse(now.at) < performance.timeOrigin) about.setup = await setup.ready({ update: "done" });
       }
       ctx.info = about;
       draw(about);
