@@ -83,7 +83,14 @@ cat >"$SCRATCH/bin/pacman" <<'STUB'
 #!/bin/bash
 [[ $1 == -Q && ${3:-$2} == bash ]]
 STUB
-chmod +x "$ORIGAITV_APP_INSTALL" "$ORIGAITV_APP_PACKAGE" "$SCRATCH/bin/pacman"
+# origaitv app remove's stand-in takes the app's record off, and notes it.
+export ORIGAITV_APP_REMOVE="$SCRATCH/remove"
+cat >"$ORIGAITV_APP_REMOVE" <<'STUB'
+#!/bin/bash
+echo "$1" >>"${0%/*}/removed"
+jq --arg id "$1" 'del(.[$id])' "$ORIGAITV_APPS/installed.json" >"$ORIGAITV_APPS/installed.json.next" && mv "$ORIGAITV_APPS/installed.json.next" "$ORIGAITV_APPS/installed.json"
+STUB
+chmod +x "$ORIGAITV_APP_INSTALL" "$ORIGAITV_APP_PACKAGE" "$SCRATCH/bin/pacman" "$ORIGAITV_APP_REMOVE"
 printf '%s' '{"apps":["origaitv.game","origaitv.broken","origaitv.shell","someone.game","origaitv.web"]}' >"$ORIGAITV_SETUP_APPS_DROP"
 PATH="$SCRATCH/bin:$PATH" run || fail "it goes through apps with programs" "$(cat "$SCRATCH/out")"
 [[ $(cat "$SCRATCH/programs") == $'origaitv.game\norigaitv.broken\norigaitv.shell' ]] || fail "every official native app goes through its program's step, which installs only what's missing" "$(cat "$SCRATCH/programs")"
@@ -92,6 +99,22 @@ jq -e '.apps["origaitv.broken"] | .state == "failed" and .error == "broken-game 
 grep -qx "TimeoutStartSec=infinity" "$ROOT/system/origaitv-setup-apps.service" || fail "origaitv-setup-apps.service waits as long as a queue of programs takes"
 grep -qx "TimeoutStartSec=60min" "$ROOT/system/origaitv-app-package@.service" || fail "and each program has a limit of its own"
 pass "ADR-042 an official native app's program comes with it, and its tile says when it didn't"
+
+# Without its program the app opens nothing, so the install that brought it
+# takes it off again, and the TV shows what's really on it.
+[[ $(cat "$SCRATCH/removed") == "origaitv.broken" ]] || fail "the app whose program didn't install goes again, and only that one" "$(cat "$SCRATCH/removed" 2>&1)"
+jq -e 'has("origaitv.broken") | not' "$ORIGAITV_APPS/installed.json" >/dev/null || fail "it's not on the TV" "$(cat "$ORIGAITV_APPS/installed.json")"
+jq -e 'has("origaitv.game") and has("origaitv.shell")' "$ORIGAITV_APPS/installed.json" >/dev/null || fail "and the ones with their programs are" "$(cat "$ORIGAITV_APPS/installed.json")"
+jq -e '.apps["origaitv.broken"].state == "failed"' "$ORIGAITV_SETUP_APPS_STATUS" >/dev/null || fail "and its line says it didn't install" "$(cat "$ORIGAITV_SETUP_APPS_STATUS")"
+# One that was on the TV already, being added again, stays as it was.
+rm -f "$SCRATCH/removed"
+jq '.["origaitv.broken"] = {id: "origaitv.broken", tier: "official"}' "$ORIGAITV_APPS/installed.json" >"$SCRATCH/next" && mv "$SCRATCH/next" "$ORIGAITV_APPS/installed.json"
+printf '%s' '{"apps":["origaitv.broken"]}' >"$ORIGAITV_SETUP_APPS_DROP"
+PATH="$SCRATCH/bin:$PATH" run || fail "adding one again that's on the TV" "$(cat "$SCRATCH/out")"
+[[ ! -e $SCRATCH/removed ]] || fail "leaves it there when its program doesn't install" "$(cat "$SCRATCH/removed")"
+jq '.' "$ORIGAITV_APPS/installed.json" | grep -q '"origaitv.broken"' || fail "and its record stays"
+jq 'del(.["origaitv.broken"])' "$ORIGAITV_APPS/installed.json" >"$SCRATCH/next" && mv "$SCRATCH/next" "$ORIGAITV_APPS/installed.json"
+pass "an app whose program didn't install is taken off again, unless it was on the TV before"
 
 for word in ProtectSystem=strict NoNewPrivileges=yes StateDirectory=origaitv/apps RuntimeDirectory=origaitv-setup-apps ReadWritePaths=-/var/lib/origaitv/daemon; do
   grep -qx "$word" "$ROOT/system/origaitv-setup-apps.service" || fail "origaitv-setup-apps.service has $word"
@@ -174,7 +197,7 @@ jq -e '.apps["origaitv.next"].state == "installed"' "$ORIGAITV_SETUP_APPS_STATUS
 pass "an install that hangs ends at its own limit, and the queue goes on"
 
 # Removing: only an official app, which goes, and its program stays.
-export ORIGAITV_APP_REMOVE="$SCRATCH/remove"
+rm -f "$SCRATCH/removed"
 cat >"$ORIGAITV_APP_REMOVE" <<'STUB'
 #!/bin/bash
 echo "$1" >>"${0%/*}/removed"

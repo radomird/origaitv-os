@@ -5,7 +5,7 @@
 // "type an address" under them. A NAS's folders list the same way.
 //
 // Tapping a row picks it on the TV, exactly as OK on the TV's own row would,
-// so it goes where the TV's pick would. "Type an address" opens the TV's
+// so it goes where the TV's pick would. "Enter the address manually" opens the TV's
 // address field, and the phone's keyboard comes up for it by itself.
 
 import { api, h, Unpaired } from "./lib.ts";
@@ -74,7 +74,7 @@ export function networkLine(list: TvList, failed: (error: unknown) => void): HTM
     { class: "r2-network", "aria-label": folders ? `${list.host}'s folders` : "On your network" },
     h("div", { class: "r2-network-head" }, h("span", {}, folders ? list.host : "On your network"), status),
     rows,
-    folders ? null : row("typed", "Type its address", "r2-network-typed"),
+    folders ? null : row("typed", "Enter the address manually", "r2-network-typed"),
   );
   let shown = "";
   let placed = false;

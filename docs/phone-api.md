@@ -257,6 +257,81 @@ Nothing in a hello is secret, and a session is worth nothing without the key. A 
 - Forgetting the phone in Settings ends all of its sessions.
 - Sessions aren't written to disk, so a daemon restart ends them all.
 
+## Setting up from the USB stick
+
+A phone can set the TV up from the moment the USB stick starts, and pair with it on the way, with one scan. The phone's own camera does the first half: it joins the TV's Wi-Fi from the code on screen and opens the stick's page. An app can do all of it, and this section is what it reads and calls. The stick's side is `configs/airootfs/usr/share/origaitv-iso/first-screen/` in origaitv-iso. The TV's side is `daemon/phones.ts` and `install/tv/state.sh` here.
+
+In short: the stick gives the phone a pairing secret before it installs, and hands the same secret to the TV it installs. After the restart, the phone pairs with that secret the way it would with a QR code's, and the TV shows no code to scan.
+
+### 1. The code on the stick's screen
+
+The stick opens a Wi-Fi network of its own and shows its QR code. It's the standard Wi-Fi code a phone's camera reads:
+
+```
+WIFI:T:WPA;S:OrigaiTV-3f9a;P:k7m2xpqr4n;;
+```
+
+- The name is `OrigaiTV-` and four hex digits. The password is 10 characters from `abcdefghjkmnpqrstuvwxyz23456789`. Both are new each time the stick starts. A `\`, `;`, `,`, `:` or `"` in either would come with a `\` before it, as the format says, though neither ever has one.
+- With no Wi-Fi card that can open a network, the code is an address on the home network instead, such as `http://192.168.1.20/?t=<token>`. Then the phone is on the home Wi-Fi already, and the `t` in the address is the token below.
+
+### 2. The stick's page and its answers
+
+Once the phone is on that Wi-Fi, the stick is `http://10.42.0.1/`, on port 80. Every name on that network points there, so a phone checking whether it's online lands on the page by itself.
+
+`GET /api/first?pair=1` says where the stick is, with what an app needs to install and pair:
+
+```json
+{
+  "step": 1,
+  "disks": [{ "path": "/dev/nvme0n1", "name": "nvme0n1", "model": "Samsung SSD 970 EVO", "size": "500 GB" }],
+  "selected": "/dev/nvme0n1",
+  "installing": null,
+  "token": "<the token>",
+  "pair": { "secret": "<16 bytes, base64url>", "port": 3001 }
+}
+```
+
+- It answers a phone on the stick's own Wi-Fi, which had the password from the TV's code. On the home network it needs the token from the address, in an `X-OrigaiTV-Token` header. Anything else gets `403`, with `Scan the code on your TV to start`.
+- `token` is only in the answer on the stick's own Wi-Fi. The page gets the same one.
+- `pair` is only there when you ask with `pair=1`, and only until the install starts. Keep the secret: it's what pairs the phone after the restart. The stick hands it to the TV only if a phone was given it, and then the TV waits for that phone instead of showing a code. The stick's own page doesn't ask, since a browser on the stick's Wi-Fi can't keep a pairing for later, so a phone that uses the page gets the TV's code at once, as before.
+
+To install, the phone sends plain JSON with the token:
+
+- `POST /api/first/pick` with `{"token": "...", "disk": "/dev/nvme0n1"}` highlights a disk on the TV.
+- `POST /api/first/install` with the same erases that disk and installs. It works once. After that, both answer `409` with `Already installing`.
+
+`step` is 2 once the install has started, and `installing` names the disk. `size` is the disk's size as the TV shows it.
+
+### 3. The restart
+
+The install takes a few minutes, then the TV restarts from its own disk. It opens the same Wi-Fi again, with the same name and password, so a phone that kept the network rejoins it by itself. The stick's page and its routes are gone by then.
+
+### 4. Pairing with the stick's secret
+
+Back on the TV's Wi-Fi, the TV is at the same address, `10.42.0.1`, and phones are on port 3001 as always. Pair with `POST http://10.42.0.1:3001/api/phone/pair`, exactly as in [`POST /api/phone/pair`](#4-post-apiphonepair), with `k` being the secret's 16 bytes. Then say [hello](#5-post-apiphonehello) and carry on.
+
+- The secret pairs one phone, and only until setup is done. After that it's refused like any code that ran out, with `That code ran out. Pair again from your TV.`
+- A code the TV shows still pairs another phone, and the stick's secret doesn't use it up.
+- Until the stick's phone pairs, setup's first screen on the TV shows no code. Once the TV is online it waits two minutes, then shows a code after all. The secret still works after that, until setup is done.
+
+### 5. The home Wi-Fi
+
+The TV needs the home Wi-Fi next, unless it's on a cable. On the TV's Wi-Fi, the same address on port 80 answers plain JSON, with no pairing and no signing:
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `GET /api/setup/networks` | None | `{ok, hotspot, networks}`: the TV's Wi-Fi's name, and each network it saw as `{ssid, signal, secure}` |
+| `POST /api/setup/wifi` | `{ssid, password}` | `{ok, joining, ask}`, or `400` with a sentence in `error` |
+| `GET /api/setup/state?ask=<ask>` | None | `{ok, on, joining, joined, error, answered}` |
+
+Send the `Host` header as `10.42.0.1`. Any other name gets a redirect to the page. The phone's page here is `companion-web/setup.ts`, which does the same.
+
+When the TV joins the home Wi-Fi, it closes its own, and the phone goes back to the home Wi-Fi. If the password was wrong, the TV opens its own again, and `GET /api/setup/state` with the `ask` you were given has `error` and `answered: true`.
+
+### 6. Finding the TV again
+
+The TV's address on the home network is new. With the `announce` switch on, look for `_origaitv._tcp` and the box id you were given when you paired, as in [Finding the TV](#finding-the-tv). With it off, `origaitv.local` on port 3001 is the TV, as long as there's only one on the network. Then say hello there. The pairing is the same one: nothing pairs again.
+
 ## The channel
 
 Everything under `/api/phone` except `pair` and `hello` goes through the channel.

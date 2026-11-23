@@ -26,6 +26,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { stripTypeScriptTypes } from "node:module";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { APPS_TILE, gridNamed, Home, type TileAnswer } from "./home.ts";
+import type { ProgramPlaces } from "./program.ts";
 import { origaitvOwner, installedPackage, userAgent } from "./identity.ts";
 import { Ai, OFFERS, planRefused, PROVIDER_LIST, TERMS_READ, type Provider } from "./ai.ts";
 import { ARCHIVES, ArtArchives, type ArtOptions } from "./art.ts";
@@ -98,6 +99,7 @@ import { discoverRoute, serverPickRoute } from "./routes/discover.ts";
 import { ServerPicks } from "./server-picks.ts";
 import { DisplayRoutes } from "./routes/display.ts";
 import { Inhibitor } from "./inhibit.ts";
+import { installedRelease, running, type Running } from "./release.ts";
 
 export interface DaemonOptions {
   root: string; // OrigaiTV's files: /usr/share/origaitv, or a checkout
@@ -128,6 +130,11 @@ export interface DaemonOptions {
   keyWaitMs?: number;
   // The channel `origaitv channel` sets: /etc/origaitv/channel (ADR-053).
   channelFile?: string;
+  // The release the ISO installed, /etc/origaitv/release (daemon/release.ts),
+  // and the package's settings, its version among them, which are in root
+  // unless a test puts them elsewhere.
+  releaseFile?: string;
+  settingsFile?: string;
   // How long a phone's controller lasts with nothing sent, and how long
   // the input helper has to make one, for tests (daemon/pads.ts).
   pads?: Pick<PadsOptions, "quietMs" | "openMs">;
@@ -147,6 +154,9 @@ export interface DaemonOptions {
   // Where packages put their desktop entries and icons, for a native app's
   // icon: /usr/local/share, /usr/share and flatpak's.
   dataDirs?: string[];
+  // Where pacman and flatpak keep what's installed: whether a native app's
+  // program is on the box.
+  programs?: ProgramPlaces;
   // The backgrounds and their credits: /var/lib/origaitv/backgrounds.
   backgrounds?: string;
   // What phones shared to the TV (ADR-050): /var/lib/origaitv/shared.
@@ -470,6 +480,7 @@ export class Daemon {
       newTile: (viewer, size) => this.newTile(viewer, size),
       log: this.log,
       dataDirs: options.dataDirs,
+      programs: options.programs,
     });
     // A sentence said to the TV: routed for who's watching, with only the
     // apps they can open, and done through the TV session.
@@ -609,7 +620,9 @@ export class Daemon {
       now: options.newsNow,
       log: this.log,
     });
-    this.phones = new Phones({ path: join(options.state, "phones.json") });
+    // A phone that set the TV up from the USB stick pairs with the stick's
+    // secret, which first boot puts here (install/tv/state.sh).
+    this.phones = new Phones({ path: join(options.state, "phones.json"), handed: join(options.state, "stick-pairing.json") });
     this.phoneChannel = new PhoneChannel({ phone: (id) => this.phones.key(id) });
     this.hotspot = new Hotspot({ state: options.state, run: options.hotspotRun });
     this.network = new TvNetwork({ hotspot: this.hotspot, run: options.hotspotRun, interfaces: options.interfaces, changed: (state) => this.toPages("network", state) });
@@ -788,7 +801,7 @@ export class Daemon {
 
   private async settings(): Promise<Record<string, string>> {
     const values: Record<string, string> = { ORIGAITV_VERSION: "dev", ORIGAITV_CHANNEL: "dev", ORIGAITV_INDEX_URL: "" };
-    const text = await readFile(join(this.options.root, "settings"), "utf8").catch(() => "");
+    const text = await readFile(this.options.settingsFile ?? join(this.options.root, "settings"), "utf8").catch(() => "");
     for (const line of text.split("\n")) {
       const at = line.indexOf("=");
       if (at > 0 && line.slice(0, at) in values) values[line.slice(0, at)] = line.slice(at + 1).trim();
@@ -804,6 +817,14 @@ export class Daemon {
     const plans = Object.values(await this.ai.offers()).filter((offer) => offer.plan.offered).map((offer) => ({ provider: offer.provider, name: offer.plan.name }));
     const ai = await this.ai.read();
     return { set, provider, plans, ai: { provider: ai.provider, path: ai.path, accepted: ai.accepted !== null, ...(ai.models ? { models: ai.models } : {}) } };
+  }
+
+  // The release this box runs, and the one it was installed from, for
+  // Settings, System (daemon/release.ts): the package's version on stable,
+  // the ISO's release while the box runs the build it carried, or null once
+  // edge has moved it on.
+  private async release(info: Record<string, string>): Promise<Running> {
+    return running(info.ORIGAITV_VERSION, await installedRelease(this.options.releaseFile));
   }
 
   // The channel this box updates from, as `origaitv channel` says it: the one
@@ -1364,6 +1385,20 @@ export class Daemon {
     this.broadcast("setup", moved);
   }
 
+  // A key saved at setup's AI step, for the AI picked, with its terms
+  // accepted: setup moves on by itself, as it does once a plan signs in.
+  private async keySaved(provider: unknown): Promise<void> {
+    const setup = await this.setupState.read();
+    if (setup.done || setup.step !== "ai") return;
+    const ai = await this.ai.read();
+    const key = this.key.status();
+    if (!key.set || ai.provider !== provider || key.provider !== provider || ai.path !== "key" || !ai.accepted) return;
+    const moved = (await this.setupState.finish("ai")).state;
+    if (!moved) return;
+    this.log(`setup: ${OFFERS[provider as Provider].name}'s key is saved, so the AI step is finished, on to ${moved.step}`);
+    this.broadcast("setup", moved);
+  }
+
   // At setup's AI step, a plan whose terms were just accepted starts its
   // sign-in right away, so the phone that accepted them shows it next.
   private async startPlanSignIn(ai: { provider: Provider | null; path: string | null; accepted: unknown }): Promise<void> {
@@ -1735,7 +1770,8 @@ export class Daemon {
       // With the announce switch on, the phone learns the box id here, to
       // find its TV by afterwards, and the TV's proof covers it. The state
       // has it too, sealed.
-      const paired = this.phones.pair(asked, (await this.boxId()).boxId);
+      // The USB stick's secret pairs its phone until setup is done.
+      const paired = this.phones.pair(asked, (await this.boxId()).boxId, !(await this.setup()).done);
       if ("error" in paired) {
         this.log("a phone sent a wrong pairing code");
         this.json(response, 403, { ok: false, error: paired.error });
@@ -2146,6 +2182,7 @@ export class Daemon {
       this.log(`a key for ${ai.provider} is kept, root's alone, from ${phone.name}`);
       this.broadcast("key", { set: true, provider: ai.provider });
       void this.fetchAiCli("a key was kept");
+      await this.keySaved(ai.provider).catch((error) => this.log(`couldn't move setup on: ${(error as Error).message}`));
       this.json(response, 200, { ok: true, provider: ai.provider });
       return;
     }
@@ -2718,6 +2755,7 @@ export class Daemon {
         ok: true,
         service: "origaitv",
         version: info.ORIGAITV_VERSION,
+        ...(await this.release(info)),
         channel: info.ORIGAITV_CHANNEL,
         // What this process runs, which after an update and before OrigaiTV's
         // services restart is still the package from before (origaitv-restart).
@@ -2750,7 +2788,7 @@ export class Daemon {
 
     if (method === "GET" && path === "/api/state") {
       const [info, setup] = await Promise.all([this.settings(), this.setup()]);
-      this.json(response, 200, { ok: true, version: info.ORIGAITV_VERSION, channel: info.ORIGAITV_CHANNEL, setup });
+      this.json(response, 200, { ok: true, version: info.ORIGAITV_VERSION, ...(await this.release(info)), channel: info.ORIGAITV_CHANNEL, setup });
       return;
     }
 
@@ -2781,6 +2819,9 @@ export class Daemon {
       // closed already, as after a join, because root also takes away the
       // network the installer handed over, which is for setup only.
       if (body.done && (!was || this.hotspot.status().on)) this.hotspot.stop();
+      // So does the USB stick's pairing secret, used or not: a setup started
+      // again later shows its code straight away.
+      if (body.done) this.phones.dropStick();
       this.broadcast("setup", setup);
       this.json(response, 200, { ok: true, setup });
       return;
@@ -2805,6 +2846,10 @@ export class Daemon {
         network: network(hotspot, this.options.interfaces?.()),
         hotspot,
         phones: this.phones.list().map((phone) => phone.name),
+        // The phone that set the TV up from the USB stick, still to pair
+        // with the stick's secret: the welcome screen waits for it rather
+        // than show a code.
+        stickPhone: !(await this.setup()).done && this.phones.waitingForStick(),
         pin: this.pin.status().set,
       });
       return;
@@ -2939,6 +2984,7 @@ export class Daemon {
       this.json(response, 200, {
         ok: true,
         version: info.ORIGAITV_VERSION,
+        ...(await this.release(info)),
         channel: info.ORIGAITV_CHANNEL,
         setup,
         viewer,
@@ -3355,6 +3401,7 @@ export class Daemon {
         void this.fetchAiCli("a key was kept");
       }
       this.broadcast("key", { set, provider: this.key.status().provider });
+      if (set) await this.keySaved(provider).catch((error) => this.log(`couldn't move setup on: ${(error as Error).message}`));
       this.json(response, 200, { ok: true, ...(await this.keyState()) });
       return;
     }
