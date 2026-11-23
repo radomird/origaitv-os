@@ -773,6 +773,7 @@ A few things to know:
 | `features` | The two switches the remote draws by: `{remote2, askbuilds}`. |
 | `ask` | What the Ask box is waiting on for an adult's OK, or `null`. Only there while `askbuilds` is on, and always `null` on a child's profile. |
 | `look` | The id of the look the TV is in, such as `"terminal"`, or `null` while the looks switch is off. |
+| `theme` | The Omarchy theme the TV is in: `{name, mode, colors}`. `colors` has what `GET /api/theme.css` has, by the same names. `null` until the TV has a theme. See [`theme`](#theme). |
 | `viewer` | Who's watching: `{id, name, role, avatar, locked}`. `role` is `"adult"` or `"child"`. `avatar` is a colour's name. `locked` means the profile asks for the PIN to open. |
 | `viewers` | Every profile, each in the same shape. |
 | `pin` | `{set, locked}`: whether there's a PIN, and whether the TV is locked now. |
@@ -817,6 +818,7 @@ Here's the whole state with every field's type, written the way TypeScript write
   features: { remote2: boolean, askbuilds: boolean },
   ask?: Ask | null,
   look: string | null,
+  theme: Theme | null,
   viewer: Viewer,
   viewers: Viewer[],
   pin: { set: boolean, locked: boolean },
@@ -847,10 +849,38 @@ A few things that hold for all of it:
 
 - Every number here is a whole number.
 - A time is text, in UTC, in one of two shapes. `pairedAt` and `said.at` have milliseconds and a `Z`: `2026-11-17T20:15:03.120Z`. A notice's `at` has neither: `2026-11-17T20:15:03+00:00`. Make sure your parser takes both.
-- The TV adds fields as it grows, and `boxId` came that way. Skip a field you don't know.
+- The TV adds fields as it grows. `boxId` came that way, and so did `theme`. Skip a field you don't know, and expect an older TV to lack a newer one.
 - `look` is `"terminal"`, `"glass"` or `"cinema"` today.
 - `setup.step` is one of `welcome`, `ready`, `box`, `country`, `ai`, `people`, `goal`, `apps`, `look`, `theme` and `background`. `part` is the words for it, to show as they are.
 - `discover.kinds` holds the kinds from [What's on the network](#whats-on-the-network). `machines` is `true` when the TV's list is one row for each machine, not one for each thing found.
+
+#### `theme`
+
+```ts
+Theme = { name: string | null, mode: "dark" | "light", colors: { [name: string]: string } }
+```
+
+This is the Omarchy theme the TV is in, for a remote that wants to wear it and can't take it as CSS.
+
+- `name` is the theme's name as Omarchy has it, such as `"tokyo-night"` or `"catppuccin-latte"`. It's `null` when the TV was handed colours with no name.
+- `mode` is `"light"` when the theme's `background` is lighter than its `foreground`, and `"dark"` otherwise. For every theme Omarchy ships, that's what the theme itself says it is.
+- `colors` has every colour `GET /api/theme.css` has, read from the same file, so the two always agree. A name here is the CSS one without its two dashes: `--dark-background` is `colors["dark-background"]`. They come in the order the CSS has them.
+- A value is text, as the CSS has it. That's a hex colour, such as `"#1a1b26"`, in every theme Omarchy ships. A theme somebody made can have `rgb(...)` or `rgba(...)` too, so don't count on hex alone.
+
+Omarchy's own themes give these twenty names:
+
+`background`, `dark-background`, `darker-background`, `lighter-background`, `foreground`, `dark-foreground`, `bright-foreground`, `accent`, `selection`, `muted`, `red`, `yellow`, `orange`, `green`, `cyan`, `blue`, `magenta`, `bright-yellow`, `bright-cyan` and `bright-magenta`.
+
+The TV then adds two for each colour it writes text in, which are `accent` and the ten from `red` to `bright-magenta`:
+
+- `<name>-ink` is that colour for text: the colour itself where it reads on the theme's backgrounds, and otherwise taken towards the foreground until it does.
+- `<name>-on` is the colour for text drawn on top of it, such as a letter on an avatar.
+
+A theme somebody made can lack some of these, so keep a colour of your own for each one you use.
+
+The state's `version` goes up when the theme changes: other colours, or another name. It doesn't when Omarchy hands the TV the same theme again, which it does each time the TV starts.
+
+A theme is only in the state, which only a paired phone can read. `GET /api/theme.css` is as it was, and still needs no pairing.
 
 #### `viewer`
 
@@ -858,7 +888,7 @@ A few things that hold for all of it:
 Viewer = { id: string, name: string, role: "adult" | "child", avatar: string, locked: boolean }
 ```
 
-`avatar` is a colour's name, not a picture: `blue`, `green`, `magenta`, `yellow`, `cyan`, `orange` or `red`. The phone's page draws the first letter of the name on that colour. The colours are the TV's theme's, and `GET /api/theme.css` has them as `--blue` and so on when the theme has them.
+`avatar` is a colour's name, not a picture: `blue`, `green`, `magenta`, `yellow`, `cyan`, `orange` or `red`. The phone's page draws the first letter of the name on that colour. The colours are the TV's theme's. The state's [`theme`](#theme) has them as `blue` and so on, and `GET /api/theme.css` has them as `--blue`, when the theme has them.
 
 #### `update`
 
@@ -1162,6 +1192,8 @@ One more controller, named "OrigaiTV phone controller". It has the layout and th
 - L2 and R2 are that controller's triggers. The phone's are buttons, so they're all the way in or all the way out.
 - Home held for a second goes home from a game. A short press is the game's own. That's the rule a real controller's guide button has.
 - The right stick and the two stick clicks are there, because the layout has them, and they never move.
+
+To a game it's a controller on USB. The TV's own Settings knows better: it doesn't list a phone with the controllers that are plugged in. The phone has its row under Phones.
 
 ### In the state
 

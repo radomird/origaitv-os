@@ -158,4 +158,28 @@ assert tv_back == 1000 and "The TV counts a second from when Esc goes down" in h
 assert sent > tv_back and f'`{{"hold":"back","ms":{sent:g}}}`' in holds, "the hold the page sends is longer than the TV's count"
 assert f"A held `enter` of {tv_ok:g} ms or more" in holds and f"Held for {tv_ok:g} ms on an app's tile" in section("The key names"), f"OK's hold is {tv_ok:g} ms on the TV"
 print("ok - the remote's holds and timings in the doc are the page's and the TV's own")
+
+# --- The theme's colours ------------------------------------------------------
+
+# The names Omarchy's own themes give are the ones OrigaiTV's template has, in
+# its order, and the ones the TV adds an ink and an "on" for are legible.ts's.
+theme = section("`theme`")
+with open(f"{root}/config/omarchy/themed/launcher.css.tpl", encoding="utf-8") as file:
+    template = re.findall(r"^  --([a-z-]+):", file.read(), re.M)
+listed = re.search(r"give these (\w+) names:\n\n(.+?)\.\n", theme)
+assert listed, "the doc's theme no longer lists the names Omarchy's themes give"
+same("the theme's colours", re.findall(r"`([a-z-]+)`", listed.group(2)), template)
+same("how many colours the doc says there are", listed.group(1), {20: "twenty"}.get(len(template), str(len(template))))
+with open(f"{root}/daemon/legible.ts", encoding="utf-8") as file:
+    inks = re.findall(r'"([a-z-]+)"', re.search(r"^const INKS = \[(.+?)\];", file.read(), re.M).group(1))
+rest = [name for name in template if name in inks and name != "accent"]
+assert inks[0] == "accent" and sorted(inks[1:]) == sorted(rest), f"legible.ts writes text in {inks}"
+at = [template.index(name) for name in rest]
+assert at == list(range(at[0], at[0] + len(rest))), "the colours with an ink are no longer one run of the template"
+number = {10: "ten"}.get(len(rest), str(len(rest)))
+assert f"which are `accent` and the {number} from `{rest[0]}` to `{rest[-1]}`" in theme, f"the doc's theme no longer says which colours get an ink: accent and {rest}"
+for line in ("  look: string | null,\n  theme: Theme | null,\n", ):
+    assert line in section("The state's types"), "the state's types no longer have the theme after the look"
+assert row(section("The state's fields"), "`theme`"), "the state's fields have the theme"
+print("ok - the theme's colours in the doc are the template's, and the ones with an ink are the TV's")
 PY

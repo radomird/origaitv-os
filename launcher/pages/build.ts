@@ -735,9 +735,14 @@ export function buildChange(ctx: Ctx, id: string): View {
   };
 }
 
-// A build moved on: the page showing again, if it's one this file draws.
-export function buildsMoved(ctx: Ctx, route: string, redraw: () => void): void {
+// A build moved on: the page that was in front when the word came, drawn
+// again with the new list, if it's one this file draws. Only if it's still
+// in front once the list is in: a page opened meanwhile, such as edit mode
+// over home, isn't drawn again under the person's hands.
+export function buildsMoved(ctx: Ctx, route: () => string, redraw: () => void): void {
+  const asked = route();
   void loadBuilds(ctx).then(() => {
-    if (route === "home" || route === "apps" || route.startsWith("build/")) redraw();
+    if (route() !== asked) return;
+    if (asked === "home" || asked === "apps" || asked.startsWith("build/")) redraw();
   });
 }
