@@ -98,6 +98,7 @@ import { discoverRoute, serverPickRoute } from "./routes/discover.ts";
 import { ServerPicks } from "./server-picks.ts";
 import { DisplayRoutes } from "./routes/display.ts";
 import { Inhibitor } from "./inhibit.ts";
+import { installedRelease, releaseOf } from "./release.ts";
 
 export interface DaemonOptions {
   root: string; // OrigaiTV's files: /usr/share/origaitv, or a checkout
@@ -128,6 +129,11 @@ export interface DaemonOptions {
   keyWaitMs?: number;
   // The channel `origaitv channel` sets: /etc/origaitv/channel (ADR-053).
   channelFile?: string;
+  // The release the ISO installed, /etc/origaitv/release (daemon/release.ts),
+  // and the package's settings, its version among them, which are in root
+  // unless a test puts them elsewhere.
+  releaseFile?: string;
+  settingsFile?: string;
   // How long a phone's controller lasts with nothing sent, and how long
   // the input helper has to make one, for tests (daemon/pads.ts).
   pads?: Pick<PadsOptions, "quietMs" | "openMs">;
@@ -788,7 +794,7 @@ export class Daemon {
 
   private async settings(): Promise<Record<string, string>> {
     const values: Record<string, string> = { ORIGAITV_VERSION: "dev", ORIGAITV_CHANNEL: "dev", ORIGAITV_INDEX_URL: "" };
-    const text = await readFile(join(this.options.root, "settings"), "utf8").catch(() => "");
+    const text = await readFile(this.options.settingsFile ?? join(this.options.root, "settings"), "utf8").catch(() => "");
     for (const line of text.split("\n")) {
       const at = line.indexOf("=");
       if (at > 0 && line.slice(0, at) in values) values[line.slice(0, at)] = line.slice(at + 1).trim();
@@ -804,6 +810,12 @@ export class Daemon {
     const plans = Object.values(await this.ai.offers()).filter((offer) => offer.plan.offered).map((offer) => ({ provider: offer.provider, name: offer.plan.name }));
     const ai = await this.ai.read();
     return { set, provider, plans, ai: { provider: ai.provider, path: ai.path, accepted: ai.accepted !== null, ...(ai.models ? { models: ai.models } : {}) } };
+  }
+
+  // The release this box runs, for Settings, System (daemon/release.ts): the
+  // package's version on stable, or else the release its ISO was, or null.
+  private async release(info: Record<string, string>): Promise<string | null> {
+    return releaseOf(info.ORIGAITV_VERSION, await installedRelease(this.options.releaseFile));
   }
 
   // The channel this box updates from, as `origaitv channel` says it: the one
@@ -2691,6 +2703,7 @@ export class Daemon {
         ok: true,
         service: "origaitv",
         version: info.ORIGAITV_VERSION,
+        release: await this.release(info),
         channel: info.ORIGAITV_CHANNEL,
         // What this process runs, which after an update and before OrigaiTV's
         // services restart is still the package from before (origaitv-restart).
@@ -2723,7 +2736,7 @@ export class Daemon {
 
     if (method === "GET" && path === "/api/state") {
       const [info, setup] = await Promise.all([this.settings(), this.setup()]);
-      this.json(response, 200, { ok: true, version: info.ORIGAITV_VERSION, channel: info.ORIGAITV_CHANNEL, setup });
+      this.json(response, 200, { ok: true, version: info.ORIGAITV_VERSION, release: await this.release(info), channel: info.ORIGAITV_CHANNEL, setup });
       return;
     }
 
@@ -2912,6 +2925,7 @@ export class Daemon {
       this.json(response, 200, {
         ok: true,
         version: info.ORIGAITV_VERSION,
+        release: await this.release(info),
         channel: info.ORIGAITV_CHANNEL,
         setup,
         viewer,

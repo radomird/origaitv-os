@@ -76,6 +76,9 @@ export interface VoiceState {
 
 export interface HomeState {
   version: string;
+  // The release this TV runs, 1.0.0-rc4, or null on a build with none
+  // (daemon/release.ts).
+  release?: string | null;
   channel: string;
   viewer: Viewer;
   viewers: Viewer[];

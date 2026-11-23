@@ -16,6 +16,13 @@ else
   echo "OrigaiTV dev ($(git -C "$ORIGAITV_PATH" rev-parse --short HEAD 2>/dev/null || echo unknown))"
 fi
 
+# The release the USB stick was, which Settings, System shows on an edge box.
+release_file=${ORIGAITV_RELEASE_FILE:-/etc/origaitv/release}
+if [[ -r $release_file ]]; then
+  release=$(sed -n '1{s/[[:space:]]//g;p;}' "$release_file")
+  [[ -z $release ]] || echo "Installed from OrigaiTV $release"
+fi
+
 if type -P omarchy-version >/dev/null; then
   echo "Omarchy $(omarchy-version)"
 fi
