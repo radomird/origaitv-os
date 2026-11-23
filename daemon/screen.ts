@@ -1654,6 +1654,8 @@ export class Screen {
       if (entry.paused) await this.media(entry, RESUME);
       entry.paused = false;
       this.running();
+      // Its site's icon, if the last look at its page came to nothing.
+      if (entry.role === "web" && !/^(https?|data):/.test(entry.id)) void this.siteIcon(id, entry);
     }).then(() => ({ ok: true }));
   }
 
@@ -2449,31 +2451,46 @@ export class Screen {
 
   // A web app's site icon, read from its page in this browser once it has
   // loaded, when the daemon still wants one: some sites refuse the daemon's
-  // own request for it (daemon/page-icon.ts). Once each time OrigaiTV starts,
-  // for each app, and only up to a minute after the page opens.
-  private iconsRead = new Set<string>();
+  // own request for it (daemon/page-icon.ts). For up to a minute after the
+  // page opens. Once it's kept, or the page names none, or the daemon wants
+  // none, that app isn't asked about again until OrigaiTV starts again. A
+  // page that never loaded, or an icon that wasn't kept, is tried again the
+  // next time the app opens.
+  private iconsDone = new Set<string>();
+  private iconsReading = new Set<string>();
   private async siteIcon(id: string, entry: Open): Promise<void> {
-    if (this.iconsRead.has(id) || !this.launcher.siteIconWanted || !this.launcher.keepSiteIcon) return;
-    this.iconsRead.add(id);
-    if (!(await this.launcher.siteIconWanted(id).catch(() => false))) return;
-    const until = this.now() + this.iconWithinMs;
-    while (this.now() < until && !this.ending) {
-      const cdp = this.apps.get("web")?.cdp;
-      if (entry.target && cdp?.evaluateInWorld) {
-        const read = (await cdp.evaluateInWorld(entry.target, ICON_WORLD, PAGE_ICON).catch(() => ({ wait: true }))) as PageIcon | { wait: true } | null;
-        if (read === null) {
-          this.log(`${id}'s page names no icon it can read`);
-          return;
+    if (this.iconsDone.has(id) || this.iconsReading.has(id) || !this.launcher.siteIconWanted || !this.launcher.keepSiteIcon) return;
+    this.iconsReading.add(id);
+    try {
+      const wanted = await this.launcher.siteIconWanted(id).catch(() => null);
+      if (wanted === false) this.iconsDone.add(id);
+      if (wanted !== true) return;
+      const until = this.now() + this.iconWithinMs;
+      while (this.now() < until && !this.ending) {
+        const cdp = this.apps.get("web")?.cdp;
+        if (entry.target && cdp?.evaluateInWorld) {
+          const read = (await cdp.evaluateInWorld(entry.target, ICON_WORLD, PAGE_ICON).catch(() => ({ wait: true }))) as PageIcon | { wait: true } | null;
+          if (read === null) {
+            this.iconsDone.add(id);
+            this.log(`${id}'s page names no icon it can read`);
+            return;
+          }
+          if (!("wait" in read)) {
+            await this.launcher
+              .keepSiteIcon(id, read)
+              .then(() => {
+                this.iconsDone.add(id);
+                this.log(`${id}'s icon, read from its page`);
+              })
+              .catch((error: Error) => this.log(`${id}'s icon from its page wasn't kept: ${error.message}`));
+            return;
+          }
         }
-        if (!("wait" in read)) {
-          await this.launcher
-            .keepSiteIcon(id, read)
-            .then(() => this.log(`${id}'s icon, read from its page`))
-            .catch((error: Error) => this.log(`${id}'s icon from its page wasn't kept: ${error.message}`));
-          return;
-        }
+        await sleep(this.iconEveryMs);
       }
-      await sleep(this.iconEveryMs);
+      this.log(`${id}'s page didn't load in time to read its icon; it's tried again the next time it opens`);
+    } finally {
+      this.iconsReading.delete(id);
     }
   }
 

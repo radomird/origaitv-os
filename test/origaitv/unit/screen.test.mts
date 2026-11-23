@@ -1670,6 +1670,25 @@ test("T30.10 a web app's site icon is read from its page in its own world once i
   assert.equal(kept.length, 1);
 });
 
+test("T30.10 a page that never loaded in time is read again the next time its app opens", async () => {
+  const t = await tv({ iconEveryMs: 10, iconWithinMs: 100 });
+  const kept: string[] = [];
+  t.launcher.siteIconWanted = async () => true;
+  t.launcher.keepSiteIcon = async (id: string) => void kept.push(id);
+  let loaded = false;
+  t.launcher.browser.evaluateInWorld = async (_target, world) => (world !== ICON_WORLD ? null : loaded ? { type: "image/png", data: "iVBORw0KGgo=", from: "https://origaitv.tube.example/icon.png" } : { wait: true });
+  await openApp(t, "origaitv.tube", "0xb");
+  for (let i = 0; i < 50 && !t.lines.some((line) => line.includes("didn't load in time")); i++) await sleep(10);
+  assert.ok(t.lines.some((line) => line.includes("origaitv.tube's page didn't load in time")), t.lines.join("\n"));
+  assert.deepEqual(kept, []);
+  // Opened again, with its page loaded this time.
+  loaded = true;
+  await t.screen.home();
+  await t.screen.fromHome({ cmd: "open-app", app: "origaitv.tube" });
+  for (let i = 0; i < 50 && !kept.length; i++) await sleep(10);
+  assert.deepEqual(kept, ["origaitv.tube"]);
+});
+
 test("T8.4 a tap on Back tells the web app's page it was a tap, for one it didn't see; a hold doesn't", async () => {
   const t = await tv({ backHoldMs: 80 });
   const target = await openApp(t, "origaitv.tube", "0xb");
