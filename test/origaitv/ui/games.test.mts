@@ -240,6 +240,40 @@ test("T23.1 adding two games: the second waits its turn, both land on home's Gam
   }
 });
 
+test("a game whose program didn't install says why, never that it couldn't be removed, isn't on home, and OK tries again", async () => {
+  await useLook("glass");
+  const why = "Couldn't install Battle.net. Update your TV in Settings, under Updates, then try again.";
+  APPS_MOVER.installFails = { "origaitv.battlenet": why };
+  const page = await tv();
+  try {
+    await openGames(page);
+    await page.keyboard.press("Enter");
+    await moveTo(page, "origaitv.battlenet");
+    await page.keyboard.press("Enter");
+    await toast(page, "Adding Battle.net…");
+    // Root's step and the daemon's next look come first.
+    await page.waitForFunction(() => document.querySelector('.panel [data-action="game-origaitv.battlenet"] .button-value')?.textContent === "Couldn't install · Try again", undefined, { timeout: 10000 });
+    await toast(page, why);
+    assert.ok(!(await page.locator(row("origaitv.battlenet")).innerText()).includes("remove"), "its row never says it couldn't be removed");
+    const home = await (await fetch(`${url}/api/home`)).json();
+    assert.ok(!(home.apps as { id: string }[]).some((app) => app.id === "origaitv.battlenet"), "home has no tile for it");
+    // Once its program can install, OK on the row adds it.
+    APPS_MOVER.installFails = {};
+    await page.keyboard.press("Enter");
+    await toast(page, "Adding Battle.net…");
+    await page.waitForFunction(() => document.querySelector('.panel [data-action="game-origaitv.battlenet"] .button-value')?.textContent === "Remove", undefined, { timeout: 10000 });
+    const after = await (await fetch(`${url}/api/home`)).json();
+    assert.ok((after.apps as { id: string }[]).some((app) => app.id === "origaitv.battlenet"), "and home has it");
+    // Back as it was for the tests after.
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector('.panel [data-action="game-origaitv.battlenet"] .button-value')?.textContent === "Add", undefined, { timeout: 10000 });
+  } finally {
+    APPS_MOVER.installFails = {};
+    await page.close();
+  }
+});
+
 test("T23.1 a game that needs a mouse and keyboard says so on its home tile, in every look, with nothing cut off", async () => {
   for (const look of ["terminal", "glass", "cinema"] as const) {
     await useLook(look);

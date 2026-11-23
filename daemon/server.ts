@@ -26,6 +26,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { stripTypeScriptTypes } from "node:module";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { APPS_TILE, gridNamed, Home, type TileAnswer } from "./home.ts";
+import type { ProgramPlaces } from "./program.ts";
 import { origaitvOwner, installedPackage, userAgent } from "./identity.ts";
 import { Ai, OFFERS, planRefused, PROVIDER_LIST, TERMS_READ, type Provider } from "./ai.ts";
 import { ARCHIVES, ArtArchives, type ArtOptions } from "./art.ts";
@@ -147,6 +148,9 @@ export interface DaemonOptions {
   // Where packages put their desktop entries and icons, for a native app's
   // icon: /usr/local/share, /usr/share and flatpak's.
   dataDirs?: string[];
+  // Where pacman and flatpak keep what's installed: whether a native app's
+  // program is on the box.
+  programs?: ProgramPlaces;
   // The backgrounds and their credits: /var/lib/origaitv/backgrounds.
   backgrounds?: string;
   // What phones shared to the TV (ADR-050): /var/lib/origaitv/shared.
@@ -470,6 +474,7 @@ export class Daemon {
       newTile: (viewer, size) => this.newTile(viewer, size),
       log: this.log,
       dataDirs: options.dataDirs,
+      programs: options.programs,
     });
     // A sentence said to the TV: routed for who's watching, with only the
     // apps they can open, and done through the TV session.

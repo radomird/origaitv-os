@@ -255,8 +255,9 @@ export const OFFICIAL = [
 // installs the Xbox controller driver, which here only says it did.
 // APPS_MOVER_MS is how long each takes, which a test can lengthen to see a
 // queue. With removeFails, a removal leaves the app where it was, as root
-// does when it can't take one off.
-export const APPS_MOVER = { ms: 400, restart: false, removeFails: false };
+// does when it can't take one off. installFails names apps whose program
+// doesn't install, with why: root takes such an app off again.
+export const APPS_MOVER = { ms: 400, restart: false, removeFails: false, installFails: {} as Record<string, string> };
 function appsMover(state: string, apps: string, status: string, catalog: IndexEntry[]): void {
   const drop = join(state, "apps-drop", "install.json");
   let going = false;
@@ -297,6 +298,10 @@ function appsMover(state: string, apps: string, status: string, catalog: IndexEn
         delete now.apps[id];
       }
       for (const id of ids) {
+        if (APPS_MOVER.installFails[id]) {
+          now.apps[id] = { state: "failed", error: APPS_MOVER.installFails[id] };
+          continue;
+        }
         const app = catalog.find((a) => a.id === id)!;
         const target = join(apps, id);
         cpSync(SAMPLE, target, { recursive: true });
@@ -390,6 +395,9 @@ export async function startBox(
     shared: join(state, "..", "shared"),
     // No packages' desktop entries or icons until a test puts some there.
     dataDirs: [join(state, "..", "share")],
+    // What pacman and flatpak have installed: no pacman, so every program
+    // counts as there, until a test makes the folder.
+    programs: { pacman: join(state, "..", "pacman-local"), flatpak: join(state, "..", "flatpak-app") },
     art: options.art,
     // The builder's folders, empty until a test plays root's part in them.
     builds: join(state, "..", "build"),

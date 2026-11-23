@@ -225,6 +225,22 @@ test("a native app with no logo of its own gets the icon its installed package g
   assert.equal((await fetch(`${url}/api/apps/origaitv.games/icon`)).status, 404);
 });
 
+test("a native app whose program didn't install isn't on home, and comes back once its package is in", async () => {
+  // As on rc4: Steam's app is on the TV, and pacman has no steam package.
+  const pacman = join(appsDir, "..", "pacman-local");
+  const ids = async () => (await get("/api/home")).apps.map((app: any) => app.id);
+  assert.ok((await ids()).includes("origaitv.games"), "with no pacman at all, as on a developer's computer, the program counts as there");
+  mkdirSync(join(pacman, "bash-5.3.3-2"), { recursive: true });
+  try {
+    assert.ok(!(await ids()).includes("origaitv.games"), "without Steam's package, home has no tile for it");
+    assert.ok((await ids()).includes("origaitv.sample"), "and every app that isn't native is still there");
+    mkdirSync(join(pacman, "steam-1.0.0.85-1"));
+    assert.ok((await ids()).includes("origaitv.games"), "with Steam's package in, the tile's back");
+  } finally {
+    rmSync(pacman, { recursive: true, force: true });
+  }
+});
+
 test("a game platform Omarchy sets up itself has the icon Omarchy keeps for its own app of that name, read on the box", async () => {
   const byId = async () => Object.fromEntries((await get("/api/home")).apps.map((app: any) => [app.id, app]));
   const share = join(appsDir, "..", "share");
