@@ -259,7 +259,7 @@ Nothing in a hello is secret, and a session is worth nothing without the key. A 
 
 ## Setting up from the USB stick
 
-A phone can set the TV up from the moment the USB stick starts, and pair with it on the way, with one scan. The phone's own camera does the first half: it joins the TV's Wi-Fi from the code on screen and opens the stick's page. An app can do all of it, and this section is what it reads and calls. The stick's side is `configs/airootfs/usr/share/origaitv-iso/first-screen/` in origaitv-iso. The TV's side is `daemon/phones.ts` and `install/tv/state.sh` here.
+A phone can set the TV up from the moment the USB stick starts, and pair with it on the way, with one scan. The phone's own camera does the first half: it joins the TV's Wi-Fi from the code on screen and opens the stick's page, which then gives the phone a link to keep for later (see [The phone's own browser](#the-phones-own-browser)). An app can do all of it, and this section is what it reads and calls. The stick's side is `configs/airootfs/usr/share/origaitv-iso/first-screen/` in origaitv-iso. The TV's side is `daemon/phones.ts` and `install/tv/state.sh` here.
 
 In short: the stick gives the phone a pairing secret before it installs, and hands the same secret to the TV it installs. After the restart, the phone pairs with that secret the way it would with a QR code's, and the TV shows no code to scan.
 
@@ -293,7 +293,8 @@ Once the phone is on that Wi-Fi, the stick is `http://10.42.0.1/`, on port 80. E
 
 - It answers a phone on the stick's own Wi-Fi, which had the password from the TV's code. On the home network it needs the token from the address, in an `X-OrigaiTV-Token` header. Anything else gets `403`, with `Scan the code on your TV to start`.
 - `token` is only in the answer on the stick's own Wi-Fi. The page gets the same one.
-- `pair` is only there when you ask with `pair=1`, and only until the install starts. Keep the secret: it's what pairs the phone after the restart. The stick hands it to the TV only if a phone was given it, and then the TV waits for that phone instead of showing a code. The stick's own page doesn't ask, since a browser on the stick's Wi-Fi can't keep a pairing for later, so a phone that uses the page gets the TV's code at once, as before.
+- `pair` is only there when you ask with `pair=1`, and only until the install starts. Keep the secret: it's what pairs the phone after the restart. The stick hands it to the TV only if a phone was given it, and then the TV waits for that phone instead of showing a code.
+- The stick's own page asks with `pair=page` instead, as its phone taps Erase and install. That hands the secret to the TV too, but the TV shows its code at once rather than wait, since that phone pairs later, from its own browser.
 
 To install, the phone sends plain JSON with the token:
 
@@ -327,6 +328,17 @@ The TV needs the home Wi-Fi next, unless it's on a cable. On the TV's Wi-Fi, the
 Send the `Host` header as `10.42.0.1`. Any other name gets a redirect to the page. The phone's page here is `companion-web/setup.ts`, which does the same.
 
 When the TV joins the home Wi-Fi, it closes its own, and the phone goes back to the home Wi-Fi. If the password was wrong, the TV opens its own again, and `GET /api/setup/state` with the `ask` you were given has `error` and `answered: true`.
+
+### The phone's own browser
+
+The page the camera opens can't keep a pairing. On an iPhone it opens in the sheet for Wi-Fi sign-ins, which forgets everything when it closes and shares nothing with Safari. So once the install starts, the stick's page offers a link to copy: `http://origaitv.local:3001/#pair=<the secret>`. Opened in the phone's own browser once the TV is back on the home Wi-Fi, that's the TV's own page, which pairs with the secret and keeps its key. `origaitv.local` follows the TV to whatever address it gets, so the pairing goes on working.
+
+What it needs, and where it works:
+
+- **iPhone:** copy the link in the sheet, then paste it into Safari once the TV is on your Wi-Fi. iOS finds `.local` names by itself. Copying uses the old way, since the sheet has no clipboard API on a page without HTTPS. If it doesn't copy, the link is on the page to select by hand.
+- **Android:** the same, pasted into Chrome. Whether a `.local` name opens depends on the Android version, so on some phones the link won't reach the TV. Then the TV's code still works.
+- **Either:** with two OrigaiTVs on one network, the second answers to another name, so the link can reach the wrong TV. It then refuses the secret, and the TV's code still works.
+- The link works until setup is done, and pairs one phone.
 
 ### 6. Finding the TV again
 

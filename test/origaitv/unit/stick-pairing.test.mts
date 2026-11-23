@@ -76,6 +76,18 @@ test("T30.2 once setup is done, the stick's secret pairs nothing, and it goes", 
   assert.equal(phones.waitingForStick(), false);
 });
 
+test("the stick's page's phone: setup shows its code meanwhile, and the secret still pairs that phone, from its own browser", () => {
+  const secret = randomBytes(16);
+  const path = join(dir, `stick-pairing-${++n}.json`);
+  writeFileSync(path, JSON.stringify({ secret: b64u(secret), wait: false }), { mode: 0o600 });
+  const phones = new Phones({ path: join(dir, `phones-${n}.json`), handed: path });
+  assert.equal(phones.waitingForStick(), false, "no wait: the code shows at once");
+  const { code } = phones.code();
+  assert.ok("id" in phones.pair(asking(secret, "Safari"), undefined, true), "the link's secret pairs");
+  assert.ok(!existsSync(path));
+  assert.equal(phones.showing()?.code, code, "the code is still there");
+});
+
 test("a stick secret that isn't 16 bytes, or no file, is no secret", () => {
   const path = join(dir, `stick-pairing-${++n}.json`);
   writeFileSync(path, JSON.stringify({ secret: b64u(randomBytes(8)) }));

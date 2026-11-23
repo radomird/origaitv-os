@@ -184,3 +184,26 @@ test("T30.2 if the stick's phone doesn't come, the code shows after a couple of 
   assert.equal((await (await fetch(`${url}/api/setup`)).json()).stickPhone, true);
   await page.close();
 });
+
+test("the stick's page's phone: the TV shows its code at once, and the link the page gave opens the remote in the phone's browser and pairs it", async () => {
+  online = true;
+  await fresh();
+  // The page asked for the secret without making the TV wait for it.
+  writeFileSync(join(state, "stick-pairing.json"), JSON.stringify({ secret, wait: false }), { mode: 0o600 });
+  hotspotIs({ on: false, ssid: null, password: null });
+  const page = await tv();
+  await page.waitForFunction(() => /^(Scan the code with your phone to pair it|Your phone is paired\. Scan the code to pair another\.)$/.test(document.querySelector(".welcome-line")?.textContent ?? ""), null, { timeout: 8000 });
+  const before = (await (await fetch(`${url}/api/setup`)).json()).phones.length;
+
+  // Later, the phone opens the link in its own browser.
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  phone.on("pageerror", (error) => errors.push(error.message));
+  await phone.goto(`http://127.0.0.1:${daemon.lanPort}/#pair=${secret}`);
+  await phone.waitForFunction(() => location.hash === "", null, { timeout: 8000 });
+  await page.waitForFunction(() => !document.querySelector(".welcome"), null, { timeout: 8000 });
+  const after = (await (await fetch(`${url}/api/setup`)).json()).phones.length;
+  assert.equal(after, before + 1, "the browser is a paired phone");
+  assert.equal((await phone.evaluate(() => Object.keys(localStorage).length)) > 0, true, "and keeps its key");
+  await phone.close();
+  await page.close();
+});

@@ -60,7 +60,9 @@ export interface Paired {
 export interface PhonesOptions {
   path: string; // <state>/phones.json
   // <state>/stick-pairing.json: the secret the USB stick handed over, as
-  // {"secret": "<16 bytes, base64url>"}, until a phone pairs with it.
+  // {"secret": "<16 bytes, base64url>", "wait": true}, until a phone pairs
+  // with it. wait is false when only the stick's page took it: that phone
+  // opens a link in its own browser later, so setup shows its code meanwhile.
   handed?: string;
   now?: () => number;
   // Random bytes and a random whole number below `max` of a test's own, in
@@ -117,9 +119,16 @@ export class Phones {
 
   // The secret the USB stick handed over, while no phone has paired with it.
   private handed(): Buffer | null {
+    return this.readHanded()?.secret ?? null;
+  }
+
+  private readHanded(): { secret: Buffer; wait: boolean } | null {
     if (!this.handedPath) return null;
     try {
-      return unb64u(JSON.parse(readFileSync(this.handedPath, "utf8"))?.secret, 16);
+      const data = JSON.parse(readFileSync(this.handedPath, "utf8"));
+      const secret = unb64u(data?.secret, 16);
+      // A file from before wait was written means an app's phone: wait.
+      return secret ? { secret, wait: data?.wait !== false } : null;
     } catch {
       return null;
     }
@@ -128,7 +137,7 @@ export class Phones {
   // Whether a phone from the USB stick is still to pair. Setup asks, to
   // wait for it rather than show a code.
   waitingForStick(): boolean {
-    return this.handed() !== null;
+    return this.readHanded()?.wait === true;
   }
 
   // The stick's secret goes: a phone paired with it, or setup is done.
