@@ -20,8 +20,9 @@ import type { Ctx, View } from "./main.ts";
 const SETUP_SIZES: SizeId[] = ["standard", "larger"];
 const SETUP_SIZE_NAMES: Partial<Record<SizeId, string>> = { standard: "Normal", larger: "Large" };
 
-// The preview's width, as D3 has it: home at 58 percent.
-const PREVIEW_WIDTH = 1114;
+// The preview's width: home at 52 percent, so the sizes under it keep
+// clear of the status bar.
+const PREVIEW_WIDTH = 1000;
 
 export async function look(ctx: Ctx): Promise<View> {
   const found = await fetch("/api/look")
