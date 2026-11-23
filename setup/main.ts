@@ -335,7 +335,8 @@ function couldNot(to: string, direction?: "forward" | "back"): View {
 // It's one line, cut short at its end if it must, so what didn't work comes
 // first, then the screen's own word, then what's under way. The AI being
 // ready gives way to any other news, and two things that didn't work are
-// one sentence: "Couldn't set up Claude or 3 apps".
+// one sentence: "Couldn't set up Claude or Steam". The apps' reason is left
+// out of that one, since it isn't the AI's.
 function barInfo(step: string, info: string): string {
   const cli = step !== "ai" && ctx.ai ? cliLine(ctx.ai) : null;
   const apps = step !== "apps" ? installLine(ctx.installs, ctx.names) : null;
@@ -343,7 +344,7 @@ function barInfo(step: string, info: string): string {
   const appsFailed = Boolean(apps?.startsWith(COULDNT_INSTALL));
   const news: [number, string][] = [];
   if (info) news.push([1, info]);
-  if (cli && cliState === "failed" && apps && appsFailed) news.push([0, `${cli} or ${apps.slice(COULDNT_INSTALL.length)}`]);
+  if (cli && cliState === "failed" && apps && appsFailed) news.push([0, `${cli} or ${installLine(ctx.installs, ctx.names, false)!.slice(COULDNT_INSTALL.length)}`]);
   else {
     if (cli) news.push([cliState === "failed" ? 0 : cliState === "ready" ? 3 : 2, cli]);
     if (apps) news.push([appsFailed ? 0 : 2, apps]);
@@ -451,7 +452,7 @@ async function start(): Promise<void> {
       (list) => {
         for (const app of [...(list.starter ?? []), ...list.for, ...(list.games ?? []), ...list.more]) {
           ctx.names[app.id] = app.name;
-          if (app.state && !ctx.installs[app.id]) ctx.installs[app.id] = { state: app.state, ...(app.error ? { error: app.error } : {}) };
+          if (app.state && !ctx.installs[app.id]) ctx.installs[app.id] = { state: app.state, ...(app.error ? { error: app.error } : {}), ...(app.reason ? { reason: app.reason } : {}) };
         }
         if (view) ctx.status(view.info ?? "");
       },

@@ -44,15 +44,20 @@ if [[ ! $id =~ ^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$ ]]; then
   exit 2
 fi
 
-# fail <why>: says why for origaitv-setup-apps, which shows it on the TV.
+# fail <why> [reason]: says why for origaitv-setup-apps, which shows it on the
+# TV, and why as a word the TV puts in its own words: offline, or update
+# when the TV needs updating first.
 fail() {
   mkdir -p "$ERRORS"
   printf '%s\n' "$1" >"$ERRORS/$id.error"
+  if [[ -n ${2:-} ]]; then
+    printf '%s\n' "$2" >"$ERRORS/$id.reason"
+  fi
   echo "origaitv-app-package: $id: $1" >&2
   exit 1
 }
 
-rm -f "$ERRORS/$id.error"
+rm -f "$ERRORS/$id.error" "$ERRORS/$id.reason"
 tier=$(jq -r --arg id "$id" '.[$id].tier // empty' "$APPS/installed.json" 2>/dev/null || true)
 [[ $tier == "official" ]] || fail "only an official app installs a program"
 manifest="$APPS/$id/manifest.json"
@@ -88,14 +93,14 @@ synced() {
   done
   if (( missing )); then
     echo "origaitv-app-package: fetching the package lists, which this box doesn't have yet"
-    pacman -Sy --noconfirm >&2 || fail "Couldn't download $name. Check your internet, then try again."
+    pacman -Sy --noconfirm >&2 || fail "Couldn't download $name. Check your internet, then try again." offline
   fi
   # Everything pacman would install for them, each by its name and version.
   while read -r each version; do
     [[ -n $each ]] || continue
     if pacman -Q -- "$each" >/dev/null 2>&1; then
       echo "origaitv-app-package: $each would be upgraded on its own, so nothing is installed" >&2
-      fail "Couldn't install $name. Update your TV in Settings, under Updates, then try again."
+      fail "Couldn't install $name. Update your TV in Settings, under Updates, then try again." update
     fi
     base=${each#lib32-}
     [[ $base != "$each" ]] || continue
@@ -104,7 +109,7 @@ synced() {
     # number, which the two sometimes don't share.
     if [[ -n $installed && ${installed%-*} != "${version%-*}" ]]; then
       echo "origaitv-app-package: $each $version wouldn't match $base $installed, so nothing is installed" >&2
-      fail "Couldn't install $name. Update your TV in Settings, under Updates, then try again."
+      fail "Couldn't install $name. Update your TV in Settings, under Updates, then try again." update
     fi
   done < <(pacman -Sp --noconfirm --print-format '%n %v' -- "$@" 2>/dev/null || true)
 }

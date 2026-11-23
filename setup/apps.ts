@@ -23,7 +23,7 @@
 
 import { h } from "../launcher/dom.ts";
 import { glyph } from "../launcher/glyphs.ts";
-import { setup, type Goal, type Installs, type SetupApp, type SetupApps } from "./api.ts";
+import { setup, type AppReason, type Goal, type Installs, type SetupApp, type SetupApps } from "./api.ts";
 import { heading } from "./frame.ts";
 import type { Ctx, View } from "./main.ts";
 import { onNetwork } from "./servers.ts";
@@ -72,7 +72,7 @@ function packNames(pack: SetupApp[]): string {
 // with another thing that didn't work.
 export const COULDNT_INSTALL = "Couldn't install ";
 
-export function installLine(apps: Installs, names: Record<string, string>): string | null {
+export function installLine(apps: Installs, names: Record<string, string>, why = true): string | null {
   const name = (id: string) => names[id] ?? id.replace(/^origaitv\./, "");
   const going = Object.keys(apps).filter((id) => apps[id].state === "queued" || apps[id].state === "installing");
   const failed = Object.keys(apps).filter((id) => apps[id].state === "failed");
@@ -87,19 +87,15 @@ export function installLine(apps: Installs, names: Record<string, string>): stri
   // Then why, when they all didn't install for the same reason the TV gave:
   // "Couldn't install Steam. Update your TV". Settings' row has the whole
   // reason.
-  const reasons = failed.map((id) => reasonFor(apps[id].error));
-  const reason = reasons.every((one) => one && one === reasons[0]) ? reasons[0] : null;
+  const reasons = failed.map((id) => apps[id].reason);
+  const reason = why && reasons.every((one) => one && one === reasons[0]) ? REASONS[reasons[0]!] : null;
   return `${COULDNT_INSTALL}${which(failed)}${reason ? `. ${reason}` : ""}`;
 }
 
 // What to do about an app that didn't install, in a few words, from the
-// TV's own reason: its lists are newer than the system, or it's offline.
-function reasonFor(error: string | undefined): string | null {
-  if (!error) return null;
-  if (/update your tv/i.test(error)) return "Update your TV";
-  if (/internet/i.test(error)) return "Check your internet";
-  return null;
-}
+// install's own reason (bin/origaitv-app-package): the TV needs updating
+// first, or it's offline.
+const REASONS: Record<AppReason, string> = { update: "Update your TV", offline: "Check your internet" };
 
 export async function apps(ctx: Ctx): Promise<View> {
   let list: SetupApps | null = await setup.apps().catch(() => null);
