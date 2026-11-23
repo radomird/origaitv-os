@@ -1049,8 +1049,30 @@ export class Remote2 {
       h("label", { class: `r2-field-box${kind === "password" ? " secret" : ""}` }, kind === "password" ? icon("lock", 18) : null, input),
       note,
       h("div", { class: "r2-gap" }),
+      // The TV shows only the service's page during a sign-in (ADR-136), so
+      // "I'm signed in" is here. The TV moves on by itself once it can tell.
+      ...(state.signIn ? [this.signedInButton(note)] : []),
       this.keys(state, true),
     ];
+  }
+
+  // "I'm signed in": the TV asks the app now, and says what it found.
+  private signedInButton(note: HTMLElement): HTMLElement {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "r2-ask r2-signed-in",
+        "data-action": "signed-in",
+        onclick: () =>
+          void post("/api/phone/signed-in", {})
+            .then((answer) => {
+              if (!answer.ok) note.textContent = answer.error ?? "Couldn't reach your TV. Try again.";
+            })
+            .catch((error) => this.kit.failed(error)),
+      },
+      "I'm signed in",
+    );
   }
 
   // --- The menu and the sheets --------------------------------------------------

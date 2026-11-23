@@ -340,10 +340,6 @@ class FakeLauncher implements Launcher {
   // The other games' commands the box has, besides Steam's.
   installed = new Set<string>();
   targets = new Map<string, AppTarget>();
-  bars: (string | null)[] = [];
-  async signInBar(name: string | null) {
-    this.bars.push(name);
-  }
   signings: (string | null)[] = [];
   async signingIn(app: { id: string; name: string } | null) {
     this.signings.push(app?.id ?? null);
@@ -586,9 +582,9 @@ test("ADR-031 Omarchy's shell started in the TV session, as Omarchy's update doe
   await screen.idle();
   assert.equal(launcher.shellStops, 1);
   assert.ok(lines.includes("Omarchy's shell came up in the TV session; stopping it"));
-  for (const own of ["origaitv-toast", "origaitv-corner", "origaitv-signin"]) hypr.emit("openlayer", own);
+  for (const own of ["origaitv-toast", "origaitv-corner"]) hypr.emit("openlayer", own);
   await screen.idle();
-  assert.equal(launcher.shellStops, 1, "OrigaiTV's toasts, corner and sign-in stay");
+  assert.equal(launcher.shellStops, 1, "OrigaiTV's toasts and corner stay");
   hypr.emit("openlayer", "omarchy-notifications");
   await screen.idle();
   assert.equal(launcher.shellStops, 2);
@@ -952,39 +948,33 @@ function fakeSignIn(answer: { now?: boolean | null; starts?: boolean } = {}) {
   return { signIn, calls };
 }
 
-test("ADR-032 T30.11 a tile that says Sign in opens the app maximized over OrigaiTV's sign-in bar, told it's full screen, until the app says it's signed in", async () => {
+test("ADR-032 T30.11 a tile that says Sign in opens the app full screen, with nothing of OrigaiTV's over it, until the app says it's signed in", async () => {
   const { signIn, calls } = fakeSignIn();
   const t = await tv({ signIn });
   t.launcher.targets.set("origaitv.tube", { runtime: "web", url: "https://tube.example/", name: "Tube" });
   assert.deepEqual(await t.screen.fromHome({ cmd: "sign-in", app: "origaitv.tube" }), { ok: true });
-  assert.deepEqual(t.launcher.bars, ["Tube"]);
-  assert.deepEqual(t.launcher.signings, ["origaitv.tube"], "the daemon hears it, for a paired phone's fields (S4.9)");
+  assert.deepEqual(t.launcher.signings, ["origaitv.tube"], "the daemon hears it, for a paired phone's fields and its I'm signed in (S4.9)");
   assert.deepEqual(calls.started, ["origaitv.tube"]);
   t.hypr.open("0xd", t.launcher.last("web").pid);
   await t.screen.idle();
   assert.equal(t.screen.front()?.address, "0xd");
-  assert.equal(t.hypr.get("0xd").fullscreen, 1, "maximized, above the bar");
-  // Told it's full screen, so Chromium shows none of its own bars: a window
+  assert.equal(t.hypr.get("0xd").fullscreen, 2, "full screen, as any app is");
+  // Never only maximized, which takes Chromium out of full screen: a window
   // it opened for a second app is an ordinary one, with tabs and an address
-  // bar, once it's told it's only maximized.
-  assert.ok(
-    t.hypr.dispatched.includes('hl.dsp.window.fullscreen_state({ window = "address:0xd", internal = 1, client = 2, action = "set" })'),
-    "told it's full screen",
-  );
-  assert.ok(!t.hypr.dispatched.some((line) => line.includes("client = 0")), "and never told it's only maximized");
+  // bar.
+  assert.ok(!t.hypr.dispatched.some((line) => line.includes("client = 0")), "never told it's only maximized");
   // Opening it for a sign-in doesn't also ask it whether it's signed in.
   assert.deepEqual(calls.checked, []);
   calls.done!(true);
   await t.screen.idle();
   // The toast comes after, not on the daemon's queue.
   await sleep(0);
-  assert.deepEqual(t.launcher.bars, ["Tube", null]);
   assert.deepEqual(t.launcher.signings, ["origaitv.tube", null]);
-  assert.equal(t.hypr.get("0xd").fullscreen, 2, "full screen again once it's signed in");
+  assert.equal(t.hypr.get("0xd").fullscreen, 2, "still full screen once it's signed in");
   assert.deepEqual(t.launcher.toasts, ["Signed in to Tube"]);
 });
 
-test("ADR-032 Home or the app closing ends the sign-in screen, and i'm signed in asks the app now", async () => {
+test("ADR-032 T30.11 Home or the app closing ends the sign-in, Home asks the app once more, and I'm signed in asks it now", async () => {
   const { signIn, calls } = fakeSignIn({ now: false });
   const t = await tv({ signIn });
   assert.deepEqual(await t.screen.handle({ cmd: "signed-in" }), { ok: false, error: "Nothing is signing in" });
@@ -996,17 +986,25 @@ test("ADR-032 Home or the app closing ends the sign-in screen, and i'm signed in
   assert.deepEqual(t.launcher.toasts, ["Still signed out of Tube"]);
   await t.screen.home();
   assert.deepEqual(calls.stopped, ["origaitv.tube"]);
-  assert.deepEqual(t.launcher.bars, ["Tube", null]);
+  assert.deepEqual(t.launcher.signings, ["origaitv.tube", null]);
   assert.equal(t.screen.front()?.role, "home");
-  // Again, with the app open behind home: it comes back maximized.
+  // Home asks the app once more, from its page behind home, and it said it's
+  // signed in: someone with only a keyboard or the remote finished on the
+  // page.
+  await t.screen.idle();
+  await sleep(0);
+  assert.deepEqual(calls.checked.map(([id]) => id), ["origaitv.tube"], "asked once more as the sign-in ended");
+  assert.deepEqual(t.launcher.toasts, ["Still signed out of Tube", "Signed in to Tube"]);
+  // Again, with the app open behind home: it comes back full screen.
   await t.screen.fromHome({ cmd: "sign-in", app: "origaitv.tube" });
   await t.screen.idle();
   assert.equal(t.screen.front()?.address, "0xd");
-  assert.equal(t.hypr.get("0xd").fullscreen, 1);
+  assert.equal(t.hypr.get("0xd").fullscreen, 2);
   t.hypr.close("0xd");
   await t.screen.idle();
   assert.deepEqual(calls.stopped, ["origaitv.tube", "origaitv.tube"]);
-  assert.deepEqual(t.launcher.bars, ["Tube", null, "Tube", null]);
+  assert.deepEqual(t.launcher.signings, ["origaitv.tube", null, "origaitv.tube", null]);
+  assert.equal(calls.checked.length, 1, "the app closing asks nothing more");
 });
 
 // Fit to screen (ADR-103): with a margin round the TV, apps are maximized
@@ -1107,7 +1105,7 @@ test("T22.4 an output that goes while a window comes in front stops it there, an
   assert.equal(t.hypr.active, "0xa");
 });
 
-test("T22.1 with no margin, an app is full screen as before, and a sign-in that ends with a margin stays inside it", async () => {
+test("T22.1 with no margin, an app is full screen as before, and with a margin a sign-in is inside it, told it's full screen", async () => {
   const t = await tv();
   await openApp(t, "origaitv.player", "0xc");
   assert.equal(t.hypr.get("0xc").fullscreen, 2);
@@ -1117,7 +1115,8 @@ test("T22.1 with no margin, an app is full screen as before, and a sign-in that 
   await fit.screen.fromHome({ cmd: "sign-in", app: "origaitv.tube" });
   fit.hypr.open("0xd", fit.launcher.last("web").pid);
   await fit.screen.idle();
-  assert.equal(fit.hypr.get("0xd").fullscreen, 1, "maximized above the bar, inside the margin");
+  assert.equal(fit.hypr.get("0xd").fullscreen, 1, "maximized inside the margin");
+  assert.ok(fit.hypr.dispatched.includes('hl.dsp.window.fullscreen_state({ window = "address:0xd", internal = 1, client = 2, action = "set" })'), "told it's full screen");
   calls.done!(true);
   await fit.screen.idle();
   assert.equal(fit.hypr.get("0xd").fullscreen, 1, "and still inside the margin once it's signed in");
@@ -1133,9 +1132,9 @@ test("ADR-032 an installed web app is asked once as it opens whether it's signed
   assert.equal(calls.checked.length, 1, "not a page opened by address");
   t.launcher.targets.set("origaitv.player", { runtime: "native", exec: ["player"] });
   assert.deepEqual(await t.screen.handle({ cmd: "sign-in", app: "origaitv.player" }), { ok: false, error: "Can't sign in to that app here" });
-  // An app with no signIn can't say, so the bar goes again.
+  // An app with no signIn can't say, so the sign-in ends again.
   assert.deepEqual(await t.screen.handle({ cmd: "sign-in", app: "origaitv.tube" }), { ok: false, error: "Can't tell if that app is signed in" });
-  assert.deepEqual(t.launcher.bars, ["origaitv.tube", null], "named by its id when the daemon gives no name");
+  assert.deepEqual(t.launcher.signings, ["origaitv.tube", null]);
   assert.equal(t.hypr.get("0xd").fullscreen, 2);
 });
 

@@ -29,7 +29,7 @@ hl.env("HYPRCURSOR_SIZE", "24")
 -- set on one line in ~/.local/state/origaitv/display, such as
 -- "HDMI-A-1 3840x2160@60 2 58 32". The last two are Fit to screen's margin
 -- (ADR-103), across and down in logical pixels, which the monitor keeps as
--- its reserved area: maximized apps and the sign-in bar stay inside it. The
+-- its reserved area: maximized apps stay inside it. The
 -- session starts at that line, so there's no flash of another mode, or of
 -- apps out to the edges, before the daemon looks. With no line (the sizes
 -- switched off, or a TV it hasn't seen yet), the TV's preferred mode at

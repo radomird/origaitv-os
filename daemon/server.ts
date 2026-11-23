@@ -1954,6 +1954,22 @@ export class Daemon {
       return;
     }
 
+    // "I'm signed in" on the phone, during a sign-in on the TV (ADR-136):
+    // the app is asked now, and the TV says what it found. The TV asks every
+    // 2 s anyway, and moves on by itself once the app says it's signed in.
+    if (method === "POST" && path === "/api/phone/signed-in") {
+      if (!this.signingIn) {
+        this.json(response, 409, { ok: false, error: "Nothing is signing in on your TV" });
+        return;
+      }
+      if (!this.remote({ cmd: "signed-in" })) {
+        this.json(response, 503, { ok: false, error: NOT_READY });
+        return;
+      }
+      this.json(response, 200, { ok: true });
+      return;
+    }
+
     // The update notice (S4.8): Install tonight and Install now are an
     // adult's, past the PIN once there is one; Later isn't.
     if (method === "POST" && path === "/api/phone/updates/tonight") {

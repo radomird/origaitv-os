@@ -207,9 +207,6 @@ export interface Launcher {
   // What opening an installed app means, from OrigaiTV's daemon, or null.
   // With its category, since a game opens and stays open as a game does.
   appTarget(id: string): Promise<AppTarget | null>;
-  // OrigaiTV's sign-in bar in the overlay, under the service's page (board
-  // 15), for the app named, or gone with null.
-  signInBar(name: string | null): Promise<void>;
   // Tells OrigaiTV's daemon the sign-in screen is up for an app, or gone, so
   // a paired phone offers its fields (S4.9).
   signingIn(app: { id: string; name: string } | null): Promise<void>;
@@ -1121,15 +1118,12 @@ export class Screen {
     );
   }
 
-  // Inside Fit to screen's margin, or above the sign-in bar: maximized, so
-  // it fills the reserved area, but told it's full screen, as it was before
-  // there was a margin. A page's own full screen, a player's, is then the
-  // page's alone, inside the window, and Escape leaves it as it always did:
-  // told it isn't full screen, Chromium asks the compositor, which the held
-  // window rule ignores, and a player's full screen never ends. Gamescope
-  // gets what it asks for too. And Chromium keeps its own bars hidden: a
-  // window it opened for a second app is an ordinary browser window, which
-  // told it's only maximized shows its tabs and its address bar.
+  // Inside Fit to screen's margin: maximized, so it fills the reserved area,
+  // but told it's full screen, as it was before there was a margin. A page's
+  // own full screen, a player's, is then the page's alone, inside the window,
+  // and Escape leaves it as it always did: told it isn't full screen,
+  // Chromium asks the compositor, which the held window rule ignores, and a
+  // player's full screen never ends. Gamescope gets what it asks for too.
   private fit(address: string): Promise<void> {
     return this.hypr.dispatch(`hl.dsp.window.fullscreen_state({ window = ${lua(`address:${address}`)}, internal = 1, client = 2, action = "set" })`);
   }
@@ -1137,14 +1131,10 @@ export class Screen {
   // Full screen, or maximized inside the monitor's reserved area: every app
   // but home while Fit to screen keeps a margin (ADR-103), so a service's
   // page and its player stay in view on a TV that crops its edges, and
-  // Steam's gamescope scales its picture into it; and the app whose sign-in
-  // screen is up, which stays above the overlay's sign-in bar, since that
-  // keeps the bottom of the screen for itself (board 15). Home stays full
-  // screen, its picture to the edges, and keeps its own words and tiles
-  // inside the margin (launcher/size.ts).
+  // Steam's gamescope scales its picture into it. Home stays full screen,
+  // its picture to the edges, and keeps its own words and tiles inside the
+  // margin (launcher/size.ts).
   private place(address: string): Promise<void> {
-    const entry = this.opens.find((o) => o.address === address);
-    if (this.signingIn && entry?.id === this.signingIn.id) return this.fit(address);
     if (this.windows.get(address)?.role !== "home" && this.fitted()) return this.fit(address);
     return this.fullscreen(address);
   }
@@ -1544,7 +1534,7 @@ export class Screen {
         if (!this.isGame(front)) return;
         this.log("the guide button held with a game in front: home");
       }
-      if (this.signingIn) await this.endSignIn("home");
+      if (this.signingIn) await this.leaveSignIn();
       const entry = front && (this.gameOf(front) ?? this.opens.find((o) => o.address === front.address));
       if (entry) {
         entry.usedAt = this.now();
@@ -2214,12 +2204,13 @@ export class Screen {
     }).then(() => ({ ok: true }));
   }
 
-  // --- Signing in (ADR-032, board 15) ---------------------------------------
+  // --- Signing in (ADR-032, ADR-136) ---------------------------------------
 
-  // The app opens as its tile would, with OrigaiTV's sign-in bar under its
-  // page, and the app brings its page to the service's sign-in form. Typing
-  // on the phone or a keyboard goes to the page. It ends once the app says
-  // it's signed in, on Home, or when the app closes.
+  // The app opens as its tile would, full screen with nothing of OrigaiTV's
+  // over it, and the app brings its page to the service's sign-in form.
+  // Typing on the phone or a keyboard goes to the page, and the paired
+  // phones offer "I'm signed in". It ends once the app says it's signed in,
+  // on Home, or when the app closes.
   async startSignIn(id: string): Promise<object> {
     if (!this.signIn) return { ok: false, error: "Signing in isn't available" };
     const target = await this.launcher.appTarget(id).catch(() => null);
@@ -2232,11 +2223,7 @@ export class Screen {
       this.signingIn = null;
       return opened.ok ? { ok: false, error: "Couldn't open that app" } : opened;
     }
-    await this.launcher.signInBar(this.signingIn.name).catch((error: Error) => this.log(`the sign-in bar: ${error.message}`));
     await this.launcher.signingIn(this.signingIn).catch(() => {});
-    // When it's open already, it's in front now: maximized from here on.
-    await this.chain;
-    if (entry.address && this.front()?.address === entry.address && (await this.onScreen())) await this.place(entry.address);
     const started = await this.signIn.start(id, this.pageOf(entry), (signedIn) => void this.signInDone(id, signedIn));
     if (!started) {
       await this.endSignIn("the app can't say whether it's signed in");
@@ -2246,7 +2233,7 @@ export class Screen {
     return { ok: true };
   }
 
-  // "i'm signed in" on the bar: the app is asked now.
+  // "I'm signed in" on a phone: the app is asked now.
   async signedInNow(): Promise<object> {
     const signing = this.signingIn;
     if (!signing || !this.signIn) return { ok: false, error: "Nothing is signing in" };
@@ -2254,6 +2241,27 @@ export class Screen {
     if (said === true) return { ok: true, signedIn: true };
     await this.toast(said === false ? `Still signed out of ${signing.name}` : `${signing.name} can't tell yet`);
     return { ok: true, signedIn: false };
+  }
+
+  // Home, or Back held, during a sign-in: it ends, and the app is asked
+  // once more as it does, out of the way of going home. A sign-in finished
+  // on the page in the last moments still counts, and the tile says Sign
+  // in only while the app says it's signed out. This is how a keyboard or
+  // the remote alone finishes, with no phone.
+  private async leaveSignIn(): Promise<void> {
+    const signing = this.signingIn;
+    if (!signing) return;
+    await this.endSignIn("home");
+    const entry = this.opens.find((o) => o.id === signing.id);
+    if (!entry || !this.signIn) return;
+    void this.signIn
+      .check(signing.id, this.pageOf(entry))
+      .then(async (said) => {
+        if (said !== true) return;
+        await this.toast(`Signed in to ${signing.name}`);
+        entry.ready = this.serviceProfile(entry);
+      })
+      .catch(() => null);
   }
 
   private async signInDone(id: string, signedIn: boolean): Promise<void> {
@@ -2290,18 +2298,14 @@ export class Screen {
     return { ok: true };
   }
 
-  // The bar goes, and the app goes back to full screen if it's in front, or
-  // stays maximized inside Fit to screen's margin.
+  // The phones stop offering the sign-in.
   private async endSignIn(why: string): Promise<void> {
     const signing = this.signingIn;
     if (!signing) return;
     this.signingIn = null;
     this.signIn?.stop(signing.id);
     this.log(`sign-in to ${signing.id} over: ${why}`);
-    await this.launcher.signInBar(null).catch((error: Error) => this.log(`the sign-in bar: ${error.message}`));
     await this.launcher.signingIn(null).catch(() => {});
-    const entry = this.opens.find((o) => o.id === signing.id);
-    if (entry?.address && this.front()?.address === entry.address && !this.ending && (await this.onScreen())) await this.place(entry.address);
   }
 
   private async soundRequest(request: Record<string, unknown>): Promise<object> {
@@ -2659,7 +2663,7 @@ export class Screen {
       // The sound output and its volume, as Settings → Sound sets them.
       case "audio":
         return this.soundRequest(request);
-      // An app's sign-in screen, and "i'm signed in" on its bar.
+      // An app's sign-in, and "I'm signed in" from a phone.
       case "sign-in":
         return this.startSignIn(String(request.app ?? ""));
       case "signed-in":
@@ -2967,17 +2971,6 @@ export const launcher: Launcher = {
     return new Promise((resolve, reject) => {
       const args = ["ipc", "-n", "-p", join(ORIGAITV_PATH, "session", "toast"), "call", "--", "corner", "front", String(appInFront)];
       execFile("qs", args, { timeout: 5000 }, (error, stdout) => {
-        if (error) reject(new Error(`the overlay didn't answer: ${error.message}`));
-        else if (stdout.trim() !== "ok") reject(new Error(`the overlay said: ${stdout.trim()}`));
-        else resolve();
-      });
-    });
-  },
-
-  signInBar(name) {
-    return new Promise((resolve, reject) => {
-      const call = name === null ? ["signin", "hide"] : ["signin", "show", name];
-      execFile("qs", ["ipc", "-n", "-p", join(ORIGAITV_PATH, "session", "toast"), "call", "--", ...call], { timeout: 5000 }, (error, stdout) => {
         if (error) reject(new Error(`the overlay didn't answer: ${error.message}`));
         else if (stdout.trim() !== "ok") reject(new Error(`the overlay said: ${stdout.trim()}`));
         else resolve();
@@ -3517,6 +3510,8 @@ async function main(): Promise<void> {
     url: `${HOME_URL}api/remote`,
     command: async (cmd) => {
       if (cmd === "update-install") await screen.fromHome({ cmd }, true);
+      // "I'm signed in" on the phone, during a sign-in (ADR-136).
+      if (cmd === "signed-in") await screen.handle({ cmd });
       // The phone's menu (ADR-065): home in front, then the page.
       if (cmd === "apps" || cmd === "settings") await screen.phonePage(cmd);
     },
