@@ -1689,10 +1689,12 @@ body.counted .player-note {
 
 /* Theme and background on one screen, with setup's own switch on: home in
    each theme along the top, and the backgrounds under it. */
+/* Each theme card has 14 px round its picture, so the focus box sits clear
+   of it, and the pictures stay 32 px apart and in line with the headline. */
 .setup-page.d3.theme2 .tb-themes {
   display: flex;
-  gap: 32px;
-  margin: 40px -16px 0;
+  gap: 4px;
+  margin: 26px -30px 0;
   padding: 16px;
   overflow-x: auto;
   scrollbar-width: none;
@@ -1709,6 +1711,10 @@ body.counted .player-note {
   background: none;
   color: var(--bright-foreground);
   text-align: left;
+}
+
+.tb-theme {
+  padding: 14px;
 }
 
 .tb-theme-name {
@@ -1729,7 +1735,7 @@ body.counted .player-note {
 }
 
 .tb-label {
-  margin-top: 24px;
+  margin-top: 10px;
   font-size: 26px;
   color: var(--foreground);
 }
