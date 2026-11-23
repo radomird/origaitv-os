@@ -47,7 +47,6 @@ const errors: string[] = [];
 
 before(async () => {
   ({ daemon, url } = await startBox(0, FIXTURES, { features: { looks: true } }));
-  await buildsLooked(daemon);
   browser = await chromium.launch({ executablePath: process.env.ORIGAITV_UI_BROWSER });
 });
 
@@ -56,18 +55,6 @@ after(async () => {
   await daemon?.close();
   assert.deepEqual(errors, []);
 });
-
-// The daemon looks at what's being built two seconds after it starts, and
-// tells its pages, since that's its first look. A page that hears it on
-// home asks for the list, and draws what's in front again when the answer
-// lands. Now and then that was home being edited, a moment after the edit
-// key, with an app in hand: the page drawn again holds nothing, so the OK
-// that should have put the app down picked it up, and it stayed held. No
-// wait in the test brings back what was held. So the daemon takes that look
-// now, before a page is open, and has nothing to say two seconds in.
-async function buildsLooked(box: Daemon): Promise<void> {
-  await (box as unknown as { watchBuilds(): Promise<void> }).watchBuilds();
-}
 
 type Tile = { id: string; x: number; y: number; size: string };
 

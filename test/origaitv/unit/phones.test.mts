@@ -215,10 +215,6 @@ before(async () => {
   });
   tv = `http://127.0.0.1:${await daemon.listen()}`;
   phone = `http://127.0.0.1:${daemon.lanPort}`;
-  // The daemon's first look at the builds tells the phones something
-  // changed, two seconds in. It's had here, so it can't land in a test that
-  // counts the changes.
-  await (daemon as unknown as { watchBuilds(): Promise<void> }).watchBuilds();
   const stream = await fetch(`${tv}/api/events`);
   const reader = stream.body!.getReader();
   void (async () => {

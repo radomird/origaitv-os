@@ -42,7 +42,6 @@ let state = "";
 
 before(async () => {
   ({ daemon, url, apps, state } = await startBox(0, [...FIXTURES, ...EXTRA], { features: PHASE_1 }));
-  await buildsLooked(daemon);
   browser = await chromium.launch({ executablePath: process.env.ORIGAITV_UI_BROWSER });
 });
 
@@ -50,18 +49,6 @@ after(async () => {
   await browser?.close();
   await daemon?.close();
 });
-
-// The daemon looks at what's being built two seconds after it starts, and
-// tells its pages, since that's its first look. A page that hears it on
-// home asks for the list, and draws what's in front again when the answer
-// lands. Now and then that was edit mode, a moment after the edit key: the
-// tile the test had just found was no longer on the page when it asked
-// where it was. A wait for the tile wouldn't do, since the same draw can
-// land in the middle of a drag. So the daemon takes that look now, before
-// a page is open, and has nothing to say two seconds in.
-async function buildsLooked(box: Daemon): Promise<void> {
-  await (box as unknown as { watchBuilds(): Promise<void> }).watchBuilds();
-}
 
 async function layout(): Promise<Record<string, string>> {
   const tiles: { id: string; x: number; y: number; size: string }[] = (await (await fetch(`${url}/api/home`)).json()).layout;
@@ -175,8 +162,6 @@ test("S2.4 the layout stays as it was left when the daemon starts again", async 
   await daemon.close();
   daemon = new Daemon({ root: ROOT, state, apps, port: 0, builtins: null, log: () => {} });
   url = `http://127.0.0.1:${await daemon.listen()}`;
-  // This daemon's first look too, for the tests after this one.
-  await buildsLooked(daemon);
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   await page.goto(`${url}/`);
   await page.waitForSelector(".grid .tile.focused");
