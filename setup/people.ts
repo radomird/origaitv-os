@@ -26,6 +26,8 @@ interface Household {
 // watching once waited for one that never came, and the AI step stayed on
 // screen with setup already past it.
 const ASK_MS = 5000;
+// How long it waits before asking again, after an answer that didn't come.
+const AGAIN_MS = 3000;
 
 async function household(): Promise<Household> {
   const reply = await (await fetch("/api/viewers", { cache: "no-store", signal: AbortSignal.timeout(ASK_MS) })).json();
@@ -135,9 +137,16 @@ export async function people(ctx: Ctx, phase2 = false): Promise<View> {
   };
 
   draw(home);
-  // Without the household, the screen came with only Add and Done: the
-  // profiles follow once the TV answers.
-  if (missed) void household().then((now) => row.isConnected && draw(now), () => {});
+  // Without the household, the screen came with only Add and Done. It asks
+  // again every few seconds while it's up, and the profiles follow once the
+  // TV answers.
+  let stopped = false;
+  const askAgain = () =>
+    void household().then(
+      (now) => !stopped && draw(now),
+      () => !stopped && setTimeout(askAgain, AGAIN_MS),
+    );
+  if (missed) setTimeout(askAgain, AGAIN_MS);
   const el = phase2
     ? h("div", { class: "setup-page d3 people2" }, ...heading("origaitv people", "Who's watching?", ctx.reduced()), row)
     : h(
@@ -154,6 +163,9 @@ export async function people(ctx: Ctx, phase2 = false): Promise<View> {
     first: phase2 ? go : (row.querySelector<HTMLElement>(".person") ?? go),
     heard(event) {
       if (event === "viewers" || event === "pin") void household().then(draw, () => {});
+    },
+    stop() {
+      stopped = true;
     },
   };
 }

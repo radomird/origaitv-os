@@ -176,15 +176,16 @@ test("T30.6 a sign-in finished in Settings, or after setup's AI step, doesn't mo
   assert.equal((await (await fetch(`${url}/api/setup`)).json()).setup.step, "goal");
 });
 
-test("T30.6 Who's watching comes once the sign-in is done, even when the TV's first answer about the household doesn't", async () => {
+test("T30.6 Who's watching comes once the sign-in is done, even when the TV's first two answers about the household don't", async () => {
   // As on the NUC with rc4: the step finished, the next screen's first ask
-  // never came back, and the AI step stayed up showing "signed in".
+  // never came back, and the AI step stayed up showing "signed in". Here
+  // the second ask goes unanswered too, and the screen keeps asking.
   atAi({ provider: "claude", path: "plan" });
   await daemon.ai.accept("claude", "plan", { phone: "iphone", viewer: "radomir" });
   const page = await tv();
   let asked = 0;
   await page.route("**/api/viewers", async (route) => {
-    if (asked++ === 0) return; // never answered
+    if (asked++ < 2) return; // never answered
     await route.continue();
   });
   try {
@@ -195,8 +196,44 @@ test("T30.6 Who's watching comes once the sign-in is done, even when the TV's fi
     signInSays({ state: "done" });
     await page.waitForFunction(() => document.querySelector(".bar .bar-step")?.textContent === "7 of 12 · who's watching", null, { timeout: 10_000 });
     // The profiles follow once the TV answers.
+    await page.waitForSelector(".people .person[data-viewer]", { timeout: 30_000 });
+    assert.ok(asked >= 3);
+  } finally {
+    await page.close();
+  }
+});
+
+test("T30.6 a step that can't be drawn says so after three tries, tells the TV's log, and Try again brings it", async () => {
+  const now = new Date().toISOString();
+  writeFileSync(join(state, "setup.json"), JSON.stringify({ done: false, step: "people", finished: { welcome: now, ready: now, country: now, ai: now } }));
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, reducedMotion: "reduce" });
+  // An answer Who's watching can't draw from, every time.
+  await page.route("**/api/viewers", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, viewers: 5 }) }));
+  const logged: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/setup/log")) logged.push(request.postData() ?? "");
+  });
+  // The page error each try throws is the point of this test.
+  page.on("pageerror", () => {});
+  await page.addInitScript(() => {
+    const w = window as unknown as { origaitvScreen: (json: string) => void; origaitvScreenReply?: (id: number, reply: string) => void };
+    w.origaitvScreen = (json: string) => {
+      const request = JSON.parse(json);
+      setTimeout(() => w.origaitvScreenReply?.(request.id, JSON.stringify({ ok: true })), 0);
+    };
+  });
+  try {
+    await page.goto(`${url}/`);
+    await page.waitForSelector('[data-failed="people"] [data-action="try-again"].focused', { timeout: 10_000 });
+    assert.equal(await page.locator(".setup-headline").getAttribute("aria-label"), "Couldn't show this step");
+    assert.equal(await bar(page), "7 of 12 · who's watching");
+    assert.equal(logged.length, 1);
+    assert.equal(JSON.parse(logged[0]).route, "people");
+    assert.equal(JSON.parse(logged[0]).tries, 3);
+    // The TV answers properly again: Try again brings the step.
+    await page.unroute("**/api/viewers");
+    await page.keyboard.press("Enter");
     await page.waitForSelector(".people .person[data-viewer]");
-    assert.ok(asked >= 2);
   } finally {
     await page.close();
   }

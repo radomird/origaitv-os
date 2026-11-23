@@ -21,7 +21,7 @@ import { Sounds } from "../launcher/sounds.ts";
 import { cliLine } from "./ai.ts";
 import { NEEDS_PIN, setup, type AiInfo, type Installs, type SetupInfo, type Step } from "./api.ts";
 import { installLine } from "./apps.ts";
-import { bar, field } from "./frame.ts";
+import { bar, field, heading } from "./frame.ts";
 import { Soundtrack } from "./music.ts";
 import { screenFor } from "./steps.ts";
 
@@ -284,17 +284,50 @@ function show(to: string, direction?: "forward" | "back"): void {
     const at = moves;
     view = undefined;
     // A screen that couldn't be drawn is tried again, rather than leaving
-    // the last one up with setup already past it.
+    // the last one up with setup already past it. After a few tries it says
+    // so, with Try again, and the TV's log says why.
     void next.then(
       (ready) => {
-        if (moves === at) put(to, ready, direction);
-        else ready.stop?.();
+        if (moves !== at) return ready.stop?.();
+        failing = null;
+        put(to, ready, direction);
       },
-      () => setTimeout(() => moves === at && show(to, direction), 1000),
+      (error: unknown) => {
+        if (moves !== at) return;
+        if (failing?.route !== to) failing = { route: to, tries: 0 };
+        failing.tries++;
+        if (failing.tries < TRIES) {
+          setTimeout(() => moves === at && show(to, direction), 1000);
+          return;
+        }
+        failing = null;
+        const why = error instanceof Error ? error.message : String(error);
+        void fetch("/api/setup/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ route: to, tries: TRIES, why }) }).catch(() => {});
+        put(to, couldNot(to, direction), direction);
+      },
     );
     return;
   }
   put(to, next, direction);
+}
+
+// How many times a screen is tried before setup says it couldn't show it,
+// and the one being tried.
+const TRIES = 3;
+let failing: { route: string; tries: number } | null = null;
+
+// A screen setup couldn't show: one line, and Try again. Back goes to the
+// step before, as from the screen itself.
+function couldNot(to: string, direction?: "forward" | "back"): View {
+  const again = h("button", { class: "button primary", "data-focus": true, "data-action": "try-again", onclick: () => show(to, direction) }, "Try again");
+  const el = h(
+    "div",
+    { class: "setup-page d3", "data-failed": to },
+    ...heading("origaitv setup", "Couldn't show this step", ctx.reduced()),
+    h("p", { class: "setup-line" }, "Try again, or go back a step"),
+    h("div", { class: "setup-actions" }, again),
+  );
+  return { el, first: again };
 }
 
 // The status bar's right side: what the screen says, and after the AI step,
