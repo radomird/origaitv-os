@@ -278,7 +278,7 @@ WIFI:T:WPA;S:OrigaiTV-3f9a;P:k7m2xpqr4n;;
 
 Once the phone is on that Wi-Fi, the stick is `http://10.42.0.1/`, on port 80. Every name on that network points there, so a phone checking whether it's online lands on the page by itself.
 
-`GET /api/first` says where the stick is:
+`GET /api/first?pair=1` says where the stick is, with what an app needs to install and pair:
 
 ```json
 {
@@ -293,7 +293,7 @@ Once the phone is on that Wi-Fi, the stick is `http://10.42.0.1/`, on port 80. E
 
 - It answers a phone on the stick's own Wi-Fi, which had the password from the TV's code. On the home network it needs the token from the address, in an `X-OrigaiTV-Token` header. Anything else gets `403`, with `Scan the code on your TV to start`.
 - `token` is only in the answer on the stick's own Wi-Fi. The page gets the same one.
-- `pair` is only there until the install starts. Keep the secret: it's what pairs the phone after the restart. The stick hands the secret to the TV only if a phone was given it.
+- `pair` is only there when you ask with `pair=1`, and only until the install starts. Keep the secret: it's what pairs the phone after the restart. The stick hands it to the TV only if a phone was given it, and then the TV waits for that phone instead of showing a code. The stick's own page doesn't ask, since a browser on the stick's Wi-Fi can't keep a pairing for later, so a phone that uses the page gets the TV's code at once, as before.
 
 To install, the phone sends plain JSON with the token:
 
