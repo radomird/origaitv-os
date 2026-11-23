@@ -567,6 +567,19 @@ test("T30.11 a sign-in step in a modal dialog: the d-pad keeps to the dialog, an
   await cdp.close(page.target);
 });
 
+test("T30.11 a picture fixed behind the whole page covers nothing: the arrows go along a row past its edge and down past the fold", async () => {
+  const page = await app("backdrop.html");
+  await cdp.evaluateIn(page.target, `document.getElementById("card-1").focus()`);
+  for (let n = 2; n <= 5; n++) await page.press("ArrowRight");
+  const last = await page.until((s) => s.focused === "card-5" && ringAround(s), "right goes along the row to its last card, past the edge of the row");
+  assert.ok(last.box!.right <= 1920, `the row scrolled it into view: ${JSON.stringify(last.box)}`);
+  // One press: what's below the fold counts as much as what's in sight,
+  // as on a page with nothing fixed behind it.
+  await page.press("ArrowDown");
+  await page.until((s) => s.focused === "far" && ringAround(s), "one press of down lands on the button far below the fold");
+  await cdp.close(page.target);
+});
+
 test("a shared link's page gets the ring, and Back is left to the screen daemon, which closes it (ADR-050, Q164)", async () => {
   const page = await app("desktop.html", SHARED_PAGE);
   await page.press("ArrowDown");

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Backdrop</title>
+<style>
+  * { outline: none; }
+  html, body { margin: 0; color: #eee; font: 20px sans-serif; }
+  #art { position: fixed; inset: 0; background: linear-gradient(#123, #312); }
+  main { position: relative; padding: 48px; }
+  .row { display: flex; gap: 24px; overflow-x: auto; width: 1200px; }
+  .row a { flex: 0 0 360px; height: 120px; background: #2a2a3a; color: #eee; }
+  #far { position: absolute; top: 2400px; left: 48px; width: 360px; height: 120px; }
+</style>
+</head>
+<body>
+<!--
+  A page with a picture fixed behind it, across the whole screen, the way
+  many home pages draw their background. Nothing covers anything: the
+  middle of the screen is empty, so the picture is what's painted there.
+  A row runs past its right edge, and one more button is far below the
+  fold, so the arrows have to scroll to reach both.
+-->
+<div id="art"></div>
+<main>
+  <div class="row">
+    <a id="card-1" href="#1">Card 1</a>
+    <a id="card-2" href="#2">Card 2</a>
+    <a id="card-3" href="#3">Card 3</a>
+    <a id="card-4" href="#4">Card 4</a>
+    <a id="card-5" href="#5">Card 5</a>
+  </div>
+  <button id="far" type="button">Far down</button>
+</main>
+</body>
+</html>

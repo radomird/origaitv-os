@@ -12,3 +12,4 @@ Its contract tests press the d-pad in its pages. The UI test `remote-page.test.m
 - `inner.html` doesn't scroll itself: a menu runs down its left side, and its rows scroll in an area of their own beside it, loading more as they go, up to row 8.
 - `consent.html` is a sign-in form with a cookie banner over it: a dark wall across the page and the banner's buttons along the bottom. The email field has the focus under the wall.
 - `confirm.html` is a sign-in step in a dialog that says it's modal, with no backdrop, so the page's own links show round it. One of its choices only shows a pointer.
+- `backdrop.html` has a picture fixed behind the whole page, which is what's painted in the empty middle of the screen. It covers nothing: a row runs past its right edge, and a button is far below the fold.

@@ -575,32 +575,56 @@ export function remotePage(holdMs = 1000, o: { back?: boolean } = {}): string {
   const showing = (el) => el.getClientRects().length > 0 && (!el.checkVisibility || el.checkVisibility({ opacityProperty: true, visibilityProperty: true }));
   // The element painted on top at a point, or null off the screen.
   const hit = (x, y) => (x >= 0 && y >= 0 && x < innerWidth && y < innerHeight ? document.elementFromPoint(x, y) : null);
-  const layer = () => {
-    const modals = [...document.querySelectorAll(MODAL), ...deep(document, "dialog[open]")].filter(showing);
+  const middle = (box) => hit((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+  // What might be over the page now: an open dialog, through shadow roots
+  // too, or else the outermost fixed element painted at the middle of the
+  // screen that covers most of it. A cover is only a maybe: a fixed
+  // background behind the page looks the same from the middle, so it
+  // counts only once it's seen hiding something to press (hides, below).
+  // Worked out once a press, since a press can gather several times.
+  const findLayer = () => {
+    const modals = [...new Set(deep(document, MODAL))].filter(showing);
     // The last one opened is the one on top, and its middle shows it.
     for (const modal of modals.reverse()) {
-      const b = modal.getBoundingClientRect();
-      const top = hit((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+      const top = middle(modal.getBoundingClientRect());
       if (top && (top === modal || holds(modal, top))) return { modal, cover: null };
     }
-    const top = hit(innerWidth / 2, innerHeight / 2);
-    for (let a = top; a && a !== document.body && a !== document.documentElement; a = parentOf(a)) {
+    let cover = null;
+    for (let a = hit(innerWidth / 2, innerHeight / 2); a && a !== document.body && a !== document.documentElement; a = parentOf(a)) {
       if (getComputedStyle(a).position !== "fixed") continue;
       const b = a.getBoundingClientRect();
       const w = Math.max(0, Math.min(b.right, innerWidth) - Math.max(b.left, 0));
       const h = Math.max(0, Math.min(b.bottom, innerHeight) - Math.max(b.top, 0));
-      if (w * h >= innerWidth * innerHeight * ${LAYER_SHARE}) return { modal: null, cover: a };
+      if (w * h >= innerWidth * innerHeight * ${LAYER_SHARE}) cover = a;
     }
-    return null;
+    return cover ? { modal: null, cover } : null;
   };
-  // Whether a thing is on top with a layer up: inside the dialog, or, over a
-  // cover, what's painted at its middle is it or inside it. One out of sight
-  // can't be checked, so it counts only inside the cover.
+  let layerAt = -Infinity;
+  let layerKept = null;
+  const layer = () => {
+    const now = performance.now();
+    if (now - layerAt > 50) {
+      layerKept = findLayer();
+      layerAt = now;
+    }
+    return layerKept;
+  };
+  // Whether a cover hides this, something outside it: what's painted at
+  // its middle is the cover or inside it. Out of sight, it can't tell.
+  const hides = (cover, el, box) => {
+    if (holds(cover, el)) return false;
+    const at = middle(box);
+    return !!at && (at === cover || holds(cover, at)) && !holds(el, at);
+  };
+  // Whether a thing can be pressed with a layer up: inside the dialog; or
+  // inside the cover; or outside it, in sight and on top. What's inside the
+  // cover is never checked, so a page whose whole app sits in one fixed box
+  // costs nothing more.
   const onTop = (el, box, up) => {
     if (up.modal) return holds(up.modal, el);
-    const at = hit((box.left + box.right) / 2, (box.top + box.bottom) / 2);
-    if (!at) return holds(up.cover, el);
-    return at === el || holds(el, at) || holds(at, el);
+    if (holds(up.cover, el)) return true;
+    const at = middle(box);
+    return !!at && (at === el || holds(el, at) || holds(at, el));
   };
 
   // Everything the d-pad can land on now, each with what of it can be in
@@ -627,12 +651,19 @@ export function remotePage(holdMs = 1000, o: { back?: boolean } = {}): string {
     const root = document.scrollingElement || document.documentElement;
     const page = { x: canScroll(root, 1, 0) || canScroll(root, -1, 0), y: canScroll(root, 0, 1) || canScroll(root, 0, -1) };
     const seen = [];
-    const up = layer();
     for (const el of found) {
       if (el.matches(":disabled") || el.closest("[inert]")) continue;
       if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
       const box = sight(el, axis, page);
-      if (box && (!up || onTop(el, box, up))) seen.push({ el, box });
+      if (box) seen.push({ el, box });
+    }
+    // With a dialog, or a cover that hides something of the page, only
+    // what's on top.
+    const up = layer();
+    if (up && (up.modal || seen.some((s) => hides(up.cover, s.el, s.box)))) {
+      const kept = seen.filter((s) => onTop(s.el, s.box, up));
+      seen.length = 0;
+      seen.push(...kept);
     }
     const set = new Set(seen.map((s) => s.el));
     const wraps = new Set();
@@ -823,9 +854,10 @@ export function remotePage(holdMs = 1000, o: { back?: boolean } = {}): string {
     if (!now || now === document.body || now === document.documentElement) return null;
     const up = layer();
     if (!up) return now;
+    if (up.modal) return holds(up.modal, now) ? now : null;
     const b = onScreen(now);
     const box = { left: Math.max(b.left, 0), top: Math.max(b.top, 0), right: Math.min(b.right, innerWidth), bottom: Math.min(b.bottom, innerHeight) };
-    return onTop(now, box, up) ? now : null;
+    return hides(up.cover, now, box) ? null : now;
   };
 
   const move = (key) => {
