@@ -185,6 +185,19 @@ test("T30.2 if the stick's phone doesn't come, the code shows after a couple of 
   await page.close();
 });
 
+test("T30.2 a day after the first start, the stick's secret is gone and setup shows its code at once", async () => {
+  online = true;
+  await fresh();
+  // Marked in a boot before this one, 25 hours ago by the wall clock.
+  const firstStart = { boot: "an-earlier-boot", sinceBootMs: 20_000, baseMs: 0, wallMs: Date.now() - 25 * 60 * 60_000, usedMs: 0 };
+  writeFileSync(join(state, "stick-pairing.json"), JSON.stringify({ secret, firstStart }), { mode: 0o600 });
+  hotspotIs({ on: false, ssid: null, password: null });
+  const page = await tv();
+  await page.waitForFunction(() => /^(Scan the code with your phone to pair it|Your phone is paired\. Scan the code to pair another\.)$/.test(document.querySelector(".welcome-line")?.textContent ?? ""), null, { timeout: 8000 });
+  assert.equal((await (await fetch(`${url}/api/setup`)).json()).stickPhone, false);
+  await page.close();
+});
+
 test("the stick's page's phone: the TV shows its code at once, and the link the page gave opens the remote in the phone's browser and pairs it", async () => {
   online = true;
   await fresh();

@@ -312,7 +312,7 @@ The install takes a few minutes, then the TV restarts from its own disk. It open
 
 Back on the TV's Wi-Fi, the TV is at the same address, `10.42.0.1`, and phones are on port 3001 as always. Pair with `POST http://10.42.0.1:3001/api/phone/pair`, exactly as in [`POST /api/phone/pair`](#4-post-apiphonepair), with `k` being the secret's 16 bytes. Then say [hello](#5-post-apiphonehello) and carry on.
 
-- The secret pairs one phone, and only until setup is done. After that it's refused like any code that ran out, with `That code ran out. Pair again from your TV.`
+- The secret pairs one phone, and only until setup is done or a day has passed since the TV first started, whichever comes first. After that the TV drops it and refuses it like any code that ran out, and setup shows its own code instead. A phone that comes back later scans that.
 - A code the TV shows still pairs another phone, and the stick's secret doesn't use it up.
 - Until the stick's phone pairs, setup's first screen on the TV shows no code. Once the TV is online it waits two minutes, then shows a code after all. The secret still works after that, until setup is done.
 - On a TV with no cable, the phone that set it up from the stick's page pairs over the TV's Wi-Fi with its code first, to pick the home Wi-Fi. On an iPhone that happens in the sheet for Wi-Fi sign-ins, which forgets its key once it closes. When the same phone later pairs with the stick's secret, that pairing takes the place of the one by code over the TV's Wi-Fi with the same name, so the TV lists the phone once.

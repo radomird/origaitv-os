@@ -13,10 +13,13 @@
 // too. The stick gives it only to the phone on its own Wi-Fi, and hands it
 // to the installed TV (first boot puts it in the daemon's state). Until
 // setup is done, that secret pairs that one phone the way the QR code's
-// does, with no code on the TV, so nobody scans twice.
+// does, with no code on the TV, so nobody scans twice. It lasts a day from
+// the TV's first start, set up or not: after that it goes, setup shows its
+// own code, and a phone that comes back later scans that.
 
 import { randomBytes, randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { uptime } from "node:os";
 import { dirname } from "node:path";
 import { b64u, hmac, INFO, phoneKey, same, unb64u, x25519Pair, x25519Shared } from "./phone-channel.ts";
 
@@ -26,6 +29,37 @@ const CODE_LENGTH = 6;
 export const CODE_MS = 10 * 60_000;
 const CODE_TRIES = 5;
 const NAME_MAX = 30;
+// How long the stick's secret lasts from the TV's first start.
+export const STICK_MS = 24 * 60 * 60_000;
+
+// The TV's clocks: which boot this is, how long since it, and the wall
+// clock. The first never jumps within a boot. The wall clock can be wrong
+// at the first start, before the TV has the time from the network.
+export interface Clock {
+  boot: string;
+  sinceBootMs: number;
+  wallMs: number;
+}
+
+function bootId(): string {
+  try {
+    return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+// How much of the stick secret's day is used, kept in its file: the boot
+// counted in, how far into that boot it started counting, what was used
+// before that boot, the wall clock's time for the first start as best
+// known, and the most seen used so far.
+interface FirstStart {
+  boot: string;
+  sinceBootMs: number;
+  baseMs: number;
+  wallMs: number;
+  usedMs: number;
+}
 
 export interface Phone {
   id: string;
@@ -69,6 +103,8 @@ export interface PhonesOptions {
   // with it. wait is false when only the stick's page took it: that phone
   // opens a link in its own browser later, so setup shows its code meanwhile.
   handed?: string;
+  // The TV's clocks, a test's own in place of the system's.
+  clock?: () => Clock;
   now?: () => number;
   // Random bytes and a random whole number below `max` of a test's own, in
   // place of the system's.
@@ -87,6 +123,7 @@ export class Phones {
   private randomInt: (max: number) => number;
   private pending: { code: string; secret: Buffer; until: number; tries: number } | null = null;
   private seen = new Map<string, string>();
+  private clock: () => Clock;
 
   constructor(options: PhonesOptions) {
     this.path = options.path;
@@ -95,6 +132,9 @@ export class Phones {
     this.given = options.random;
     this.random = options.random ?? randomBytes;
     this.randomInt = options.randomInt ?? randomInt;
+    this.clock = options.clock ?? (() => ({ boot: bootId(), sinceBootMs: uptime() * 1000, wallMs: this.now() }));
+    // The daemon starts with the TV, so this is the first start's mark.
+    this.readHanded();
   }
 
   private read(): Stored[] {
@@ -123,17 +163,57 @@ export class Phones {
   }
 
   // The secret the USB stick handed over, while no phone has paired with it,
-  // and whether setup waits for that phone.
+  // and whether setup waits for that phone. Its day is counted here: the
+  // first read marks the first start, and once a day has gone by it goes.
   private readHanded(): { secret: Buffer; wait: boolean } | null {
     if (!this.handedPath) return null;
+    let data: Record<string, unknown>;
     try {
-      const data = JSON.parse(readFileSync(this.handedPath, "utf8"));
-      const secret = unb64u(data?.secret, 16);
-      // A file from before wait was written means an app's phone: wait.
-      return secret ? { secret, wait: data?.wait !== false } : null;
+      data = JSON.parse(readFileSync(this.handedPath, "utf8"));
     } catch {
       return null;
     }
+    const secret = unb64u(data?.secret, 16);
+    if (!secret) return null;
+    if (this.used(data) >= STICK_MS) {
+      this.dropStick();
+      return null;
+    }
+    // A file from before wait was written means an app's phone: wait.
+    return { secret, wait: data?.wait !== false };
+  }
+
+  // How much of the secret's day has gone, keeping the count in the file.
+  // Within a boot, it's what was used before that boot plus the time since,
+  // by the clock that never jumps, so a wall clock set right or wrong in the
+  // meantime changes nothing. At the first read in a new boot, the time the
+  // TV was off is the wall clock against the first start's time, as best
+  // known, and never less than what was used before. So a clock that's
+  // wrong at the first start can't cut the day short or stretch it, and one
+  // set back after a restart can't give it its hours back.
+  private used(data: Record<string, unknown>): number {
+    const now = this.clock();
+    const mark = data.firstStart as FirstStart | undefined;
+    const valid = mark && typeof mark.boot === "string" && [mark.sinceBootMs, mark.baseMs, mark.wallMs, mark.usedMs].every(Number.isFinite);
+    let next: FirstStart;
+    if (valid && mark.boot === now.boot && now.boot !== "") {
+      const used = Math.max(mark.usedMs, mark.baseMs + now.sinceBootMs - mark.sinceBootMs);
+      next = { ...mark, wallMs: now.wallMs - used, usedMs: used };
+    } else {
+      const used = valid ? Math.max(mark.usedMs, now.wallMs - mark.wallMs) : 0;
+      next = { boot: now.boot, sinceBootMs: now.sinceBootMs, baseMs: used, wallMs: now.wallMs - used, usedMs: used };
+    }
+    // Written when it's new or a new boot, when the wall clock moved by more
+    // than a minute, or every ten minutes of use, not on every read.
+    if (!valid || next.boot !== mark.boot || Math.abs(next.wallMs - mark.wallMs) > 60_000 || next.usedMs - mark.usedMs >= 10 * 60_000) {
+      try {
+        writeFileSync(`${this.handedPath}.next`, `${JSON.stringify({ ...data, firstStart: next })}\n`, { mode: 0o600 });
+        renameSync(`${this.handedPath}.next`, this.handedPath!);
+      } catch {
+        // Counted from what's known: the next read tries again.
+      }
+    }
+    return next.usedMs;
   }
 
   // Whether a phone from the USB stick is still to pair. Setup asks, to

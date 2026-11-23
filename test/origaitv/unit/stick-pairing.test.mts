@@ -210,3 +210,75 @@ test("T30.2 with setup done the welcome screen hears nothing of the stick's phon
   await assert.rejects(pairPhone(phone, { secret: b64u(secret) }, "late"), /ran out/);
   assert.ok(!existsSync(join(dir, "state", "stick-pairing.json")), "it goes");
 });
+
+// The stick's secret lasts a day from the TV's first start. A clock of the
+// test's own: which boot, how long into it, and the wall clock.
+const HOUR = 60 * 60_000;
+function clocked(wait = true) {
+  const secret = randomBytes(16);
+  const path = join(dir, `stick-pairing-${++n}.json`);
+  writeFileSync(path, JSON.stringify({ secret: b64u(secret), wait }), { mode: 0o600 });
+  const now = { boot: "first", sinceBootMs: 30_000, wallMs: Date.parse("2026-11-24T10:00:00Z") };
+  const phones = () => new Phones({ path: join(dir, `phones-${n}.json`), handed: path, clock: () => ({ ...now }) });
+  return { secret, path, now, phones };
+}
+
+test("T30.2 the stick's secret still pairs 23 hours after the first start, with setup unfinished", () => {
+  const { secret, now, phones } = clocked();
+  phones();
+  now.sinceBootMs += 23 * HOUR;
+  now.wallMs += 23 * HOUR;
+  const tv = phones();
+  assert.equal(tv.waitingForStick(), true);
+  assert.ok("id" in tv.pair(asking(secret, "iPhone"), undefined, true));
+});
+
+test("T30.2 a day after the first start the stick's secret is gone, with setup unfinished, and setup stops waiting for its phone", () => {
+  const { secret, path, now, phones } = clocked();
+  phones();
+  now.sinceBootMs += 24 * HOUR;
+  now.wallMs += 24 * HOUR;
+  const tv = phones();
+  assert.equal(tv.waitingForStick(), false);
+  assert.ok(!existsSync(path), "the TV dropped it");
+  const { code } = tv.code();
+  assert.deepEqual(tv.pair(asking(secret, "iPhone"), undefined, true), { error: "That isn't the code on your TV" });
+  assert.ok("id" in tv.pair(asking(code, "iPhone"), undefined, true), "the TV's own code pairs instead");
+});
+
+test("T30.2 a wall clock that's wrong at the first start neither cuts the day short nor stretches it", () => {
+  // The first start's wall clock is a year behind, until the TV has the time.
+  const { now, phones } = clocked();
+  now.wallMs -= 365 * 24 * HOUR;
+  phones();
+  // An hour in, the TV sets its clock right: a jump of a year.
+  now.sinceBootMs += HOUR;
+  now.wallMs += 365 * 24 * HOUR + HOUR;
+  assert.equal(phones().waitingForStick(), true, "the jump doesn't use the day up");
+  // A restart 22 hours later, by the corrected clock: 23 hours in all.
+  now.boot = "second";
+  now.sinceBootMs = 20_000;
+  now.wallMs += 22 * HOUR;
+  assert.equal(phones().waitingForStick(), true);
+  // And another, past the day.
+  now.boot = "third";
+  now.wallMs += 2 * HOUR;
+  assert.equal(phones().waitingForStick(), false, "the day ends on time");
+});
+
+test("T30.2 a wall clock set back after a restart doesn't give the secret its day again", () => {
+  const { now, phones } = clocked();
+  phones();
+  now.sinceBootMs += 20 * HOUR;
+  now.wallMs += 20 * HOUR;
+  assert.equal(phones().waitingForStick(), true);
+  // After a restart the clock is a day behind: what was used still counts.
+  now.boot = "second";
+  now.sinceBootMs = 10_000;
+  now.wallMs -= 24 * HOUR;
+  assert.equal(phones().waitingForStick(), true);
+  // Five hours into this boot, by its own clock, the day is over.
+  now.sinceBootMs += 5 * HOUR;
+  now.wallMs += 5 * HOUR;
+  assert.equal(phones().waitingForStick(), false);
+});
