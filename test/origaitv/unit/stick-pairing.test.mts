@@ -155,6 +155,13 @@ test("T30.2 origaitv-phone-call pairs with a secret from the environment, as the
 test("T30.2 with setup done the welcome screen hears nothing of the stick's phone", async () => {
   writeFileSync(join(dir, "state", "stick-pairing.json"), JSON.stringify({ secret: b64u(secret) }), { mode: 0o600 });
   assert.equal((await fetch(`${tv}/api/setup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done: true }) })).status, 200);
+  // Setup's end takes it away by itself, with no pairing call after it, so
+  // a setup started again doesn't wait for a phone that never came.
+  assert.ok(!existsSync(join(dir, "state", "stick-pairing.json")), "it goes as setup ends");
+  assert.equal((await fetch(`${tv}/api/setup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done: false }) })).status, 200);
+  assert.equal((await setupInfo()).stickPhone, false, "a setup started again has no stick phone to wait for");
+  assert.equal((await fetch(`${tv}/api/setup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done: true }) })).status, 200);
+  writeFileSync(join(dir, "state", "stick-pairing.json"), JSON.stringify({ secret: b64u(secret) }), { mode: 0o600 });
   assert.equal((await setupInfo()).stickPhone, false);
   await assert.rejects(pairPhone(phone, { secret: b64u(secret) }, "late"), /ran out/);
   assert.ok(!existsSync(join(dir, "state", "stick-pairing.json")), "it goes");

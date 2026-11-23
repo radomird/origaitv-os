@@ -7,8 +7,9 @@
 // the Wi-Fi it can see, with its password typed on the TV.
 //
 // A phone that installed the TV from the USB stick pairs by itself once
-// it's back, with the stick's secret: the screen waits for it with no code,
-// and shows the code after a couple of minutes if it doesn't come.
+// it's back, with the stick's secret, on the TV's own Wi-Fi or at home: the
+// screen waits for it with no code, and shows the codes after a couple of
+// minutes if it doesn't come.
 //
 // With setup's own switch on (D3), it's "hi.", one line and the code, with
 // no "use a keyboard instead": the phone is the way in. Enter still carries
@@ -20,8 +21,8 @@ import { setup, type SetupInfo } from "./api.ts";
 import { heading, hi, prompt } from "./frame.ts";
 import type { Ctx, View } from "./main.ts";
 
-// How long the screen waits for the stick's phone, once the box is online,
-// before it shows a code after all.
+// How long the screen waits for the stick's phone before it shows a code
+// after all.
 const STICK_WAIT_MS = 2 * 60_000;
 
 // What's going on, for the status bar.
@@ -65,7 +66,7 @@ export function welcome(ctx: Ctx, phase2 = false): View {
   let pairing: { code: string; until: number; url: string | null } | null = null;
   let paired: string | null = null;
   let finishing = false;
-  // When the box was first seen online with the stick's phone still to pair.
+  // When the screen first saw the stick's phone still to pair.
   let waitingSince = 0;
   let stopped = false;
   let timer = 0;
@@ -115,14 +116,14 @@ export function welcome(ctx: Ctx, phase2 = false): View {
       // so the TV still needs the home Wi-Fi, picked on that phone.
       line.textContent = hotspot.error ? `${hotspot.error}. Pick your Wi-Fi again on your phone.` : "Pick your Wi-Fi on your phone";
       showQr(null);
+    } else if (about.stickPhone && !hotspot.joining && !hotspot.error && (waitingSince ||= Date.now()) > Date.now() - STICK_WAIT_MS) {
+      line.textContent = "Waiting for your phone…";
+      showQr(null);
     } else if (hotspot.on && hotspot.ssid) {
       line.textContent = hotspot.error ? `${hotspot.error}. Scan the code to try again.` : "Scan the code with your phone";
       showQr(`/api/hotspot/qr?${encodeURIComponent(hotspot.ssid)}`, "Wi-Fi ", asWritten(hotspot.ssid), ...(hotspot.password ? [" · password ", asWritten(hotspot.password)] : []));
     } else if (hotspot.joining) {
       line.replaceChildren("Joining ", asWritten(hotspot.joining), "…");
-      showQr(null);
-    } else if (network.online && about.stickPhone && (waitingSince ||= Date.now()) > Date.now() - STICK_WAIT_MS) {
-      line.textContent = "Waiting for your phone…";
       showQr(null);
     } else if (network.online) {
       const code = await pairCode();

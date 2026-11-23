@@ -2757,6 +2757,9 @@ export class Daemon {
       // closed already, as after a join, because root also takes away the
       // network the installer handed over, which is for setup only.
       if (body.done && (!was || this.hotspot.status().on)) this.hotspot.stop();
+      // So does the USB stick's pairing secret, used or not: a setup started
+      // again later shows its code straight away.
+      if (body.done) this.phones.dropStick();
       this.broadcast("setup", setup);
       this.json(response, 200, { ok: true, setup });
       return;

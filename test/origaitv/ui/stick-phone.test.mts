@@ -85,8 +85,10 @@ test("T30.2 the stick's phone pairs on the TV's own Wi-Fi with no code shown, pi
   await fresh();
   hotspotIs({ on: true });
   const page = await tv();
-  // The TV's own Wi-Fi, for a phone that wasn't on the stick's.
-  await line(page, "Scan the code with your phone");
+  // The TV opened the stick's Wi-Fi again, and the phone rejoins it by
+  // itself: no Wi-Fi code and no pairing code to scan meanwhile.
+  await line(page, "Waiting for your phone…");
+  assert.ok(await page.locator(".welcome-qr.away").count(), "no code to scan");
   assert.equal((await (await fetch(`${url}/api/phones`)).json()).pairing, null, "no pairing code on show");
 
   // The phone is back on the TV's Wi-Fi and pairs with the stick's secret.
@@ -125,24 +127,51 @@ test("T30.2 on a cable the screen waits for the stick's phone with no code, and 
   await page.close();
 });
 
-test("T30.2 if the stick's phone doesn't come, the code shows after a couple of minutes", async () => {
-  online = true;
-  await fresh();
-  hotspotIs({ on: false, ssid: null, password: null });
+// The page with its clock held, and its line read after each step of the
+// clock, with time for the daemon's answers to come back.
+async function heldClock(): Promise<{ page: Page; lineAfter: (ms: number) => Promise<string | null | undefined> }> {
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   page.on("pageerror", (error) => errors.push(error.message));
   await page.clock.install();
   await page.goto(`${url}/`);
   await page.waitForFunction(() => (window as unknown as { origaitvWelcome?: boolean }).origaitvWelcome === true);
   await page.waitForSelector(".welcome");
-  // The page's clock is held, so its line is read after each step of it,
-  // with time for the daemon's answers to come back.
   const lineAfter = async (ms: number) => {
     await page.clock.runFor(ms);
     await new Promise((resolve) => setTimeout(resolve, 500));
     await page.clock.runFor(100);
     return page.evaluate(() => document.querySelector(".welcome-line")?.textContent);
   };
+  return { page, lineAfter };
+}
+
+test("T30.2 on the TV's own Wi-Fi, if the stick's phone doesn't come, the Wi-Fi code shows after a couple of minutes", async () => {
+  online = false;
+  await fresh();
+  hotspotIs({ on: true });
+  const { page, lineAfter } = await heldClock();
+  assert.equal(await lineAfter(4000), "Waiting for your phone…");
+  assert.equal(await lineAfter(60_000), "Waiting for your phone…");
+  await lineAfter(60_000 + 4000);
+  assert.equal(await lineAfter(2000), "Scan the code with your phone");
+  assert.match((await page.locator(".welcome-qr .qr").getAttribute("src")) ?? "", /^\/api\/hotspot\/qr/, "the Wi-Fi code is on show");
+  await page.close();
+});
+
+test("T30.2 a Wi-Fi password that didn't work shows while the stick's phone is still to pair", async () => {
+  online = false;
+  await fresh();
+  hotspotIs({ on: true, error: "that password didn't work for home wi-fi" });
+  const page = await tv();
+  await line(page, "that password didn't work for home wi-fi. Scan the code to try again.");
+  await page.close();
+});
+
+test("T30.2 if the stick's phone doesn't come, the code shows after a couple of minutes", async () => {
+  online = true;
+  await fresh();
+  hotspotIs({ on: false, ssid: null, password: null });
+  const { page, lineAfter } = await heldClock();
   assert.equal(await lineAfter(4000), "Waiting for your phone…");
   assert.equal(await lineAfter(60_000), "Waiting for your phone…");
   await lineAfter(60_000 + 4000);
