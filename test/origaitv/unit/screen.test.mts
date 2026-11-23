@@ -1642,6 +1642,36 @@ test("a new Widevine module starts the services' Chromium again once it's not in
   assert.equal(t.screen.front()?.role, "home");
 });
 
+// A box online fetches its first module whenever it does, as often as not
+// with the TV off: the apps paused behind home stay until the TV's been off
+// long enough for every app to close.
+test("a new Widevine module waits while the TV is off, so the apps it paused are still there when it's back", async () => {
+  let hint: string | null = null;
+  const t = await tv({ widevine: async () => hint, servicesExitMs: 500, tvOffCloseMs: 60_000 });
+  await openApp(t, "origaitv.tube", "0xb");
+  const browser = t.launcher.last("web");
+  browser.stop = () => {
+    browser.stopped = true;
+    t.hypr.close("0xb");
+    setTimeout(() => browser.exit(), 5);
+  };
+  await t.screen.home();
+  await t.screen.tv(false);
+  hint = "/var/lib/origaitv/chromium/WidevineCdm/4.10.3112.0";
+  t.screen.widevineChanged(hint);
+  await t.screen.idle();
+  // A key while it's off goes home, and that doesn't close it either.
+  await t.screen.home();
+  assert.equal(browser.stopped, false, "not while the TV is off");
+  assert.deepEqual((await open(t.screen)).map((o) => o.id), ["origaitv.tube"]);
+  // Back on: the next time home is pressed, it starts again.
+  await t.screen.tv(true);
+  assert.deepEqual((await open(t.screen)).map((o) => o.id), ["origaitv.tube"]);
+  await t.screen.home();
+  assert.equal(browser.stopped, true);
+  assert.deepEqual(await open(t.screen), []);
+});
+
 test("a new Widevine module waits while a web game runs behind home, which comes back where it was", async () => {
   let hint: string | null = null;
   const t = await tv({ widevine: async () => hint, servicesExitMs: 500 });

@@ -1584,7 +1584,7 @@ export class Screen {
       this.running();
       // Home is in front: the services' Chromium can start again for a new
       // Widevine module, with its apps paused behind home.
-      if (this.servicesStale && this.servicesRestartable()) await this.restartServices("home is in front");
+      if (this.servicesStale && !this.tvOff && this.servicesRestartable()) await this.restartServices("home is in front");
     }).then(() => ({ ok: true }));
   }
 
@@ -1696,10 +1696,12 @@ export class Screen {
 
   // Nobody's using the services' Chromium: home or a game in front, no
   // ambient screen over an app, no sign-in, and no web game left running
-  // under home, which closing it would end.
+  // under home, which closing it would end. Not while the TV is off either:
+  // the apps it paused stay as they were until the TV's been off for
+  // tvOffCloseMs (offTooLong), so a TV that's back on sooner finds them.
   private servicesIdle(): boolean {
     const front = this.front();
-    if (this.ambient || this.signingIn || (front && front.role !== "home" && front.role !== "game")) return false;
+    if (this.tvOff || this.ambient || this.signingIn || (front && front.role !== "home" && front.role !== "game")) return false;
     return this.servicesRestartable();
   }
 
