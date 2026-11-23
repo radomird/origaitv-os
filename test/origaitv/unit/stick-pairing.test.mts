@@ -88,6 +88,38 @@ test("the stick's page's phone: setup shows its code meanwhile, and the secret s
   assert.equal(phones.showing()?.code, code, "the code is still there");
 });
 
+test("on a TV with no cable, the stick's page's phone is listed once: its link takes the place of its pairing in the sign-in sheet", () => {
+  const secret = randomBytes(16);
+  const path = join(dir, `stick-pairing-${++n}.json`);
+  writeFileSync(path, JSON.stringify({ secret: b64u(secret), wait: false }), { mode: 0o600 });
+  const phones = new Phones({ path: join(dir, `phones-${n}.json`), handed: path });
+  // Over the TV's own Wi-Fi during setup: the sheet, by the TV's code.
+  let { code } = phones.code();
+  assert.ok("id" in phones.pair(asking(code, "iPhone"), undefined, true, true));
+  // Another phone with another name, over the same Wi-Fi, stays.
+  ({ code } = phones.code());
+  assert.ok("id" in phones.pair(asking(code, "Android phone"), undefined, true, true));
+  // And one by code on the home network stays too, whatever its name.
+  ({ code } = phones.code());
+  assert.ok("id" in phones.pair(asking(code, "iPhone"), undefined, true, false));
+  // Then the stick's link, in that iPhone's own browser.
+  const linked = phones.pair(asking(secret, "iPhone"), undefined, true);
+  assert.ok("id" in linked);
+  assert.deepEqual(phones.list().map((p) => p.name).sort(), ["Android phone", "iPhone", "iPhone"]);
+  assert.ok(phones.list().some((p) => p.id === linked.id), "the link's pairing is the one kept");
+  assert.ok(!JSON.stringify(phones.list()).includes("setupHotspot"));
+});
+
+test("with an app's phone to come, a pairing over the TV's own Wi-Fi is left alone", () => {
+  const secret = randomBytes(16);
+  const path = handed(secret);
+  const phones = new Phones({ path: join(dir, `phones-${n}.json`), handed: path });
+  const { code } = phones.code();
+  assert.ok("id" in phones.pair(asking(code, "iPhone"), undefined, true, true));
+  assert.ok("id" in phones.pair(asking(secret, "iPhone"), undefined, true));
+  assert.equal(phones.list().length, 2);
+});
+
 test("a stick secret that isn't 16 bytes, or no file, is no secret", () => {
   const path = join(dir, `stick-pairing-${++n}.json`);
   writeFileSync(path, JSON.stringify({ secret: b64u(randomBytes(8)) }));

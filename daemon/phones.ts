@@ -36,6 +36,11 @@ export interface Phone {
 
 interface Stored extends Phone {
   key: string; // the phone's key, 32 bytes in base64
+  // Paired with the TV's code over the TV's own Wi-Fi during setup, while
+  // the stick's page phone was still to come. On an iPhone that's the sheet
+  // for Wi-Fi sign-ins, which forgets its key once it closes, and the same
+  // phone pairs again later from the stick's link. See pair().
+  setupHotspot?: true;
 }
 
 // What a phone sends to pair: its one-time public key, and proof that it
@@ -114,14 +119,11 @@ export class Phones {
   }
 
   list(): Phone[] {
-    return this.read().map(({ key: _key, ...phone }) => ({ ...phone, seenAt: this.seen.get(phone.id) ?? phone.seenAt }));
+    return this.read().map(({ key: _key, setupHotspot: _setup, ...phone }) => ({ ...phone, seenAt: this.seen.get(phone.id) ?? phone.seenAt }));
   }
 
-  // The secret the USB stick handed over, while no phone has paired with it.
-  private handed(): Buffer | null {
-    return this.readHanded()?.secret ?? null;
-  }
-
+  // The secret the USB stick handed over, while no phone has paired with it,
+  // and whether setup waits for that phone.
   private readHanded(): { secret: Buffer; wait: boolean } | null {
     if (!this.handedPath) return null;
     try {
@@ -178,10 +180,18 @@ export class Phones {
   //
   // `stick` says whether the USB stick's secret may pair: only until setup
   // is done. Past that, it goes.
-  pair(request: PairRequest | undefined, boxId?: string, stick = false): Paired | { error: string } {
+  //
+  // `overHotspot` says the phone came over the TV's own Wi-Fi. On a TV with
+  // no cable, the phone that set it up from the stick's page pairs there
+  // with the TV's code to finish setup, in the sheet for Wi-Fi sign-ins on
+  // an iPhone. Later it opens the stick's link in its own browser and pairs
+  // again. That pairing takes the place of the first, by the same name, so
+  // the TV lists the phone once.
+  pair(request: PairRequest | undefined, boxId?: string, stick = false, overHotspot = false): Paired | { error: string } {
     const live = this.pending && this.pending.until > this.now() ? this.pending : null;
     if (!stick && this.handedPath) this.dropStick();
-    const handed = stick ? this.handed() : null;
+    const stickPhone = stick ? this.readHanded() : null;
+    const handed = stickPhone?.secret ?? null;
     if (!live && !handed) return { error: "That code ran out. Pair again from your TV." };
     // A wrong try counts against the code on show. The stick's secret is 16
     // random bytes, which nobody guesses, so it has no tries to run out of.
@@ -214,7 +224,14 @@ export class Phones {
     const name = request?.name;
     const label = (typeof name === "string" && name.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, NAME_MAX)) || "a phone";
     const phone: Phone = { id: `p-${this.random(4).toString("hex")}`, name: label, pairedAt: new Date(this.now()).toISOString() };
-    this.write([...this.read(), { ...phone, key: key.toString("base64") }]);
+    let phones = this.read();
+    if (byStick) {
+      const first = phones.filter((p) => p.setupHotspot && p.name === label).pop();
+      if (first) phones = phones.filter((p) => p !== first);
+      phones = phones.map(({ setupHotspot: _setup, ...p }) => p);
+    }
+    const mark = !byStick && overHotspot && stickPhone?.wait === false ? { setupHotspot: true as const } : {};
+    this.write([...phones, { ...phone, key: key.toString("base64"), ...mark }]);
     if (boxId === undefined) return { id: phone.id, key: b64u(ours.public), confirm: b64u(hmac(key, INFO.pairBox, theirs, ours.public)), phone };
     return { id: phone.id, key: b64u(ours.public), confirm: b64u(hmac(key, INFO.pairBoxId, theirs, ours.public, boxId)), phone, boxId };
   }

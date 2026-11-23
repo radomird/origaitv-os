@@ -293,8 +293,9 @@ Once the phone is on that Wi-Fi, the stick is `http://10.42.0.1/`, on port 80. E
 
 - It answers a phone on the stick's own Wi-Fi, which had the password from the TV's code. On the home network it needs the token from the address, in an `X-OrigaiTV-Token` header. Anything else gets `403`, with `Scan the code on your TV to start`.
 - `token` is only in the answer on the stick's own Wi-Fi. The page gets the same one.
-- `pair` is only there when you ask with `pair=1`, and only until the install starts. Keep the secret: it's what pairs the phone after the restart. The stick hands it to the TV only if a phone was given it, and then the TV waits for that phone instead of showing a code.
-- The stick's own page asks with `pair=page` instead, as its phone taps Erase and install. That hands the secret to the TV too, but the TV shows its code at once rather than wait, since that phone pairs later, from its own browser.
+- `pair` is only there when you ask for it, with `pair=1` or `pair=page`, and only until the install starts. Keep the secret: it's what pairs the phone after the restart. The stick hands it to the TV only if a phone was given it.
+- An app asks with `pair=1`, and then the TV waits for that phone instead of showing a code. The stick's own page asks with `pair=page`, as its phone taps Erase and install, and then the TV shows its code at once, since that phone pairs later, from its own browser. If both ask, the TV waits.
+- There's one secret, whoever asks. It pairs the first phone that uses it, and refuses any other, which pairs with the TV's code instead.
 
 To install, the phone sends plain JSON with the token:
 
@@ -314,6 +315,7 @@ Back on the TV's Wi-Fi, the TV is at the same address, `10.42.0.1`, and phones a
 - The secret pairs one phone, and only until setup is done. After that it's refused like any code that ran out, with `That code ran out. Pair again from your TV.`
 - A code the TV shows still pairs another phone, and the stick's secret doesn't use it up.
 - Until the stick's phone pairs, setup's first screen on the TV shows no code. Once the TV is online it waits two minutes, then shows a code after all. The secret still works after that, until setup is done.
+- On a TV with no cable, the phone that set it up from the stick's page pairs over the TV's Wi-Fi with its code first, to pick the home Wi-Fi. On an iPhone that happens in the sheet for Wi-Fi sign-ins, which forgets its key once it closes. When the same phone later pairs with the stick's secret, that pairing takes the place of the one by code over the TV's Wi-Fi with the same name, so the TV lists the phone once.
 
 ### 5. The home Wi-Fi
 

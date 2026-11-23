@@ -1752,7 +1752,8 @@ export class Daemon {
       // find its TV by afterwards, and the TV's proof covers it. The state
       // has it too, sealed.
       // The USB stick's secret pairs its phone until setup is done.
-      const paired = this.phones.pair(asked, (await this.boxId()).boxId, !(await this.setup()).done);
+      const overHotspot = (request.socket.localAddress ?? "").replace(/^::ffff:/, "") === (this.options.hotspotAddress ?? HOTSPOT_ADDRESS);
+      const paired = this.phones.pair(asked, (await this.boxId()).boxId, !(await this.setup()).done, overHotspot);
       if ("error" in paired) {
         this.log("a phone sent a wrong pairing code");
         this.json(response, 403, { ok: false, error: paired.error });
