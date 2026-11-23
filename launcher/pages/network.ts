@@ -198,14 +198,23 @@ export interface ListOptions {
   machines?: boolean;
   // The row after the list, which has the focus until something's found.
   typed: HTMLElement;
+  // How long the list looks before it says what it found, and stops
+  // asking. Without it, it keeps the box looking for as long as it's open.
+  waitMs?: number;
+  // What it says while it looks, once it found something, and once it
+  // found nothing. And where it says it, when not under the list.
+  words?: { looking: string; found: string; none: string };
+  note?: HTMLElement;
 }
 
 // The list, filling as the box hears from the network, for as long as it's
 // on the page.
 export function foundList(options: ListOptions): { el: HTMLElement; rows: HTMLElement } {
+  const words = options.words ?? { looking: "Looking…", found: "", none: "Nothing found on your network" };
   const rows = h("div", { class: "found-rows profile-form" });
-  const looking = h("div", { class: "panel-note found-looking" }, "Looking…");
-  const el = h("div", { class: "found-list" }, rows, looking);
+  const looking = options.note ?? h("div", { class: "panel-note found-looking" });
+  looking.textContent = words.looking;
+  const el = h("div", { class: "found-list" }, rows, ...(options.note ? [] : [looking]));
   let unhear: (() => void) | null = null;
   // How many times the stream spoke: an answer asked for before the last
   // time is older than what it said, and is left out.
@@ -224,10 +233,14 @@ export function foundList(options: ListOptions): { el: HTMLElement; rows: HTMLEl
     if (first && (!had || had === options.typed) && (count === 0 || Date.now() - born < SETTLE_MS)) options.focus.set(first, false);
   };
 
+  // Past its wait, the list has looked long enough, whatever the box says.
+  let waited = false;
+  let last: { found?: Found[]; looking?: boolean } = { looking: true };
   const draw = (answer: { found?: Found[]; looking?: boolean }) => {
+    last = answer;
     const found = (answer.found ?? []).filter((one) => options.kinds.includes(one.kind));
     const items = options.machines ? machines(found) : found.map((one) => ({ key: `${one.kind} ${one.url}`, face: one.kind, name: one.name, value: addressOf(one), found: one }));
-    looking.textContent = answer.looking ? "Looking…" : items.length ? "" : "Nothing found on your network";
+    looking.textContent = items.length ? words.found : answer.looking && !waited ? words.looking : words.none;
     const key = items.map((item) => `${item.key} ${item.name} ${item.value}`).join("|");
     if (key === shown) return;
     shown = key;
@@ -248,6 +261,9 @@ export function foundList(options: ListOptions): { el: HTMLElement; rows: HTMLEl
   };
   const again = () => {
     if (gone()) return stop();
+    // Past its wait, even when the timer that asks fires in the same
+    // moment as the one that ends it.
+    if (options.waitMs !== undefined && Date.now() - born >= options.waitMs) return clearInterval(timer);
     const at = spoke;
     void ask<never>(`/api/discover?kinds=${kinds}`).then(
       (answer) => spoke === at && draw(answer),
@@ -265,6 +281,16 @@ export function foundList(options: ListOptions): { el: HTMLElement; rows: HTMLEl
     draw(data as { found: Found[]; looking: boolean });
   });
   const timer = setInterval(again, AGAIN_MS);
+  if (options.waitMs !== undefined) {
+    // Done looking: no more asks, and it says what it found. A find that
+    // still comes in shows.
+    setTimeout(() => {
+      if (gone()) return stop();
+      waited = true;
+      clearInterval(timer);
+      draw(last);
+    }, options.waitMs);
+  }
   for (const at of [400, 900, SETTLE_MS]) setTimeout(settle, at);
   again();
   onTv(el, { kinds, machines: Boolean(options.machines) }, (key) => {

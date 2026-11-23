@@ -9,8 +9,9 @@
 //   (daemon/server-picks.ts), so its tile is ready on home.
 // - Music's lists the NASes, then the picked one's folders. The folder
 //   picked is a music source, as it would be from Music → sources.
-// - "Type an address on your phone" is the second choice, and "set it up
-//   later" goes on. An app left for later says "set up" on its tile.
+// - "Enter the address manually", on the phone, is the second choice, and
+//   "Later" goes on. An app left for later says "set up" on its tile. Each
+//   page looks for 20 seconds, then says what it found.
 
 import { screen } from "../launcher/api.ts";
 import { h } from "../launcher/dom.ts";
@@ -80,12 +81,23 @@ export function serverPage(ctx: Ctx): View {
   return app === MUSIC ? musicPage(ctx) : appPage(ctx, app);
 }
 
-// The two rows under every list: an address typed on the phone, and later.
+// How long a page looks before it says what it found: the box answers
+// within a few seconds, so this is plenty.
+const WAIT_MS = 20_000;
+
+// The two choices under every list: an address typed on the phone, and
+// later.
 function choices(ctx: Ctx, typed: () => void): { typed: HTMLElement; later: HTMLElement } {
   return {
-    typed: h("button", { class: "button found-typed", "data-focus": true, "data-action": "type-address", onclick: typed }, "Type its address"),
+    typed: h("button", { class: "button found-typed", "data-focus": true, "data-action": "type-address", onclick: typed }, "Enter the address manually"),
     later: h("button", { class: "button", "data-focus": true, "data-action": "later", onclick: () => next(ctx) }, "Later"),
   };
+}
+
+// A page drawn like setup's other new screens (D3): the headline, one line
+// under it that says how the looking goes, then the list and the choices.
+function page(ctx: Ctx, command: string, title: string, line: HTMLElement, ...rest: (HTMLElement | null)[]): HTMLElement[] {
+  return [...heading(command, title, ctx.reduced()), line, h("div", { class: "found" }, ...rest)];
 }
 
 function appPage(ctx: Ctx, app: string): View {
@@ -121,18 +133,15 @@ function appPage(ctx: Ctx, app: string): View {
     form.classList.remove("hidden");
     ctx.focus.set(address, false);
   });
-  const list = foundList({ kinds: serverKinds(app) ?? [], focus: ctx.focus, typed, pick: (server: Found) => void use(server.url, server.name) });
-  const el = h(
-    "div",
-    { class: "setup-page" },
-    h("div", {}, ...heading(`origaitv app setup ${name.toLowerCase()}`, `Pick your ${name}`, ctx.reduced())),
-    h("div", { class: "found" }, h("span", { class: "field-label" }, "Found on your network"), list.el, typed, form, later),
-  );
+  const line = h("p", { class: "setup-line", "data-line": "found" });
+  const words = { looking: "Looking on your network…", found: "Found on your network", none: `No ${name} found on your network` };
+  const list = foundList({ kinds: serverKinds(app) ?? [], focus: ctx.focus, typed, pick: (server: Found) => void use(server.url, server.name), waitMs: WAIT_MS, words, note: line });
+  const el = h("div", { class: "setup-page d3 servers2" }, ...page(ctx, `origaitv app setup ${name.toLowerCase()}`, `Pick your ${name}`, line, list.el, form, h("div", { class: "setup-actions" }, typed, later)));
   return { el, first: typed };
 }
 
 function musicPage(ctx: Ctx): View {
-  const el = h("div", { class: "setup-page" });
+  const el = h("div", { class: "setup-page d3 servers2" });
   let nasHost: string | null = null;
   let adding = false;
 
@@ -176,11 +185,10 @@ function musicPage(ctx: Ctx): View {
       form.classList.remove("hidden");
       ctx.focus.set(address, false);
     });
-    const list = foundList({ kinds: NAS, machines: true, focus: ctx.focus, typed, pick: (one) => folders(one.host) });
-    el.replaceChildren(
-      h("div", {}, ...heading("origaitv music sources", "Pick your drive", ctx.reduced())),
-      h("div", { class: "found" }, h("span", { class: "field-label" }, "Found on your network"), list.el, typed, form, later),
-    );
+    const line = h("p", { class: "setup-line", "data-line": "found" });
+    const words = { looking: "Looking on your network…", found: "Found on your network", none: "No drives found on your network" };
+    const list = foundList({ kinds: NAS, machines: true, focus: ctx.focus, typed, pick: (one) => folders(one.host), waitMs: WAIT_MS, words, note: line });
+    el.replaceChildren(...page(ctx, "origaitv music sources", "Pick your drive", line, list.el, form, h("div", { class: "setup-actions" }, typed, later)));
     return typed;
   };
 
@@ -188,10 +196,7 @@ function musicPage(ctx: Ctx): View {
   const folders = (host: string) => {
     nasHost = host;
     const list: ReturnType<typeof shareList> = shareList({ host, focus: ctx.focus, pick: (share: ShareFound, password?: string) => void add(share.uri, share.name, password, list) });
-    el.replaceChildren(
-      h("div", {}, ...heading(`origaitv music sources ${host}`, host, ctx.reduced())),
-      h("div", { class: "found" }, h("span", { class: "field-label" }, "Pick the folder with your music"), list.el),
-    );
+    el.replaceChildren(...page(ctx, `origaitv music sources ${host}`, host, h("p", { class: "setup-line" }, "Pick the folder with your music"), list.el));
     ctx.sounds.play("forward");
   };
 
