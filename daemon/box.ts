@@ -31,7 +31,7 @@
 
 import { execFile } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
-import { mkdir, readdir, readFile, rename, statfs, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, rename, statfs, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import type { BoxReport } from "../launcher/box-lines.ts";
@@ -714,10 +714,21 @@ export function wake(interfaces: ReturnType<typeof networkInterfaces>): Wake | n
 export interface Pad {
   name: string;
   bus: "usb" | "bluetooth" | "other";
+  // True for the controller a phone in game mode is, and never there for a
+  // real one.
+  phone?: true;
 }
+
+// What a phone's controller is called (PAD_NAME in daemon/input.py). It
+// says it's on USB and has a common wired controller's ids, so that games
+// know its layout, and only its name is its own.
+export const PHONE_PAD = "OrigaiTV phone controller";
 
 export async function readPads(root: string): Promise<Pad[]> {
   const input = join(root, "sys/class/input");
+  // Where the kernel keeps the devices that aren't hardware, such as the
+  // ones the input helper makes.
+  const made = `${await realpath(join(root, "sys")).catch(() => join(root, "sys"))}/devices/virtual/`;
   const pads: Pad[] = [];
   for (const event of await list(input)) {
     if (!/^event\d+$/.test(event)) continue;
@@ -726,7 +737,12 @@ export async function readPads(root: string): Promise<Pad[]> {
     const db = await text(join(root, "run/udev/data", `c${dev}`));
     if (!/^E:ID_INPUT_JOYSTICK=1$/m.test(db)) continue;
     const bus = Number.parseInt(await text(join(input, event, "device/id/bustype")), 16);
-    pads.push({ name: (await text(join(input, event, "device/name"))) || event, bus: bus === 3 ? "usb" : bus === 5 ? "bluetooth" : "other" });
+    const name = (await text(join(input, event, "device/name"))) || event;
+    // A phone's controller has that name and is a device the TV made. A
+    // real controller is hardware whatever it calls itself, so it's never
+    // taken for one.
+    const phone = name === PHONE_PAD && (await realpath(join(input, event)).catch(() => "")).startsWith(made);
+    pads.push({ name, bus: bus === 3 ? "usb" : bus === 5 ? "bluetooth" : "other", ...(phone ? { phone } : {}) });
   }
   return pads;
 }

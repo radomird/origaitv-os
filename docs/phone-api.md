@@ -1193,6 +1193,8 @@ One more controller, named "OrigaiTV phone controller". It has the layout and th
 - Home held for a second goes home from a game. A short press is the game's own. That's the rule a real controller's guide button has.
 - The right stick and the two stick clicks are there, because the layout has them, and they never move.
 
+To a game it's a controller on USB. The TV's own Settings knows better: it doesn't list a phone with the controllers that are plugged in. The phone has its row under Phones.
+
 ### In the state
 
 Two fields, there only while the switch is on:

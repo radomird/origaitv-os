@@ -60,9 +60,11 @@ export class ControllerRoutes {
   }
 
   // What the page gets: the answer, and the controllers on a cable, which
-  // need nothing. With no TV session to ask, Bluetooth is "away".
+  // need nothing. A phone in game mode isn't one of those: it says it's on
+  // USB so that games know its layout, and it has its row under Phones.
+  // With no TV session to ask, Bluetooth is "away".
   private async state(answer: ControllerAnswer): Promise<object> {
-    const usb = [...new Set((await this.kit.pads().catch(() => [])).filter((pad) => pad.bus !== "bluetooth").map((pad) => pad.name))].slice(0, 16);
+    const usb = [...new Set((await this.kit.pads().catch(() => [])).filter((pad) => pad.bus !== "bluetooth" && !pad.phone).map((pad) => pad.name))].slice(0, 16);
     return { ...answer, bluetooth: answer === LATE ? "away" : answer.bluetooth, usb };
   }
 
