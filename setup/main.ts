@@ -20,7 +20,7 @@ import { pad as pinPad, type Pad, type PadOptions } from "../launcher/pages/pin.
 import { Sounds } from "../launcher/sounds.ts";
 import { cliLine } from "./ai.ts";
 import { NEEDS_PIN, setup, type AiInfo, type Installs, type SetupInfo, type Step } from "./api.ts";
-import { installLine } from "./apps.ts";
+import { COULDNT_INSTALL, installLine } from "./apps.ts";
 import { bar, field, heading } from "./frame.ts";
 import { Soundtrack } from "./music.ts";
 import { screenFor } from "./steps.ts";
@@ -332,10 +332,27 @@ function couldNot(to: string, direction?: "forward" | "back"): View {
 
 // The status bar's right side: what the screen says, and after the AI step,
 // the provider's CLI arriving in the background, as the apps do after theirs.
+// It's one line, cut short at its end if it must, so what didn't work comes
+// first, then the screen's own word, then what's under way. The AI being
+// ready gives way to any other news, and two things that didn't work are
+// one sentence: "Couldn't set up Claude or 3 apps".
 function barInfo(step: string, info: string): string {
   const cli = step !== "ai" && ctx.ai ? cliLine(ctx.ai) : null;
-  const installing = step !== "apps" ? installLine(ctx.installs, ctx.names) : null;
-  return [info, cli, installing].filter(Boolean).join(" · ");
+  const apps = step !== "apps" ? installLine(ctx.installs, ctx.names) : null;
+  const cliState = ctx.ai?.cli?.state ?? "installing";
+  const appsFailed = Boolean(apps?.startsWith(COULDNT_INSTALL));
+  const news: [number, string][] = [];
+  if (info) news.push([1, info]);
+  if (cli && cliState === "failed" && apps && appsFailed) news.push([0, `${cli} or ${apps.slice(COULDNT_INSTALL.length)}`]);
+  else {
+    if (cli) news.push([cliState === "failed" ? 0 : cliState === "ready" ? 3 : 2, cli]);
+    if (apps) news.push([appsFailed ? 0 : 2, apps]);
+  }
+  const said = news.length > 1 ? news.filter(([rank]) => rank < 3) : news;
+  return said
+    .sort((a, b) => a[0] - b[0])
+    .map(([, text]) => text)
+    .join(" · ");
 }
 
 function put(to: string, next: View, direction?: "forward" | "back"): void {
@@ -427,6 +444,20 @@ async function start(): Promise<void> {
     .catch(() => {});
   ctx.updates = await daemon.updates().catch(() => ctx.updates);
   ctx.ai = await setup.ai().catch(() => undefined);
+  // Past the apps step, the apps' names and how their installs went, so the
+  // bar can name them after the page loads again.
+  if (ctx.info.setup.finished.apps) {
+    void setup.apps().then(
+      (list) => {
+        for (const app of [...(list.starter ?? []), ...list.for, ...(list.games ?? []), ...list.more]) {
+          ctx.names[app.id] = app.name;
+          if (app.state && !ctx.installs[app.id]) ctx.installs[app.id] = { state: app.state, ...(app.error ? { error: app.error } : {}) };
+        }
+        if (view) ctx.status(view.info ?? "");
+      },
+      () => {},
+    );
+  }
   show(ctx.info.setup.step);
   document.body.append(music.el);
   void music.start(ctx.info.setup.muted);

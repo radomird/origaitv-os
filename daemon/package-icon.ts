@@ -143,15 +143,27 @@ export function themeIcon(icon: string, dirs: string[] = DATA_DIRS): { path: str
   return null;
 }
 
+// The name Omarchy's package gives the icon of its own app in the hicolor
+// theme: the app's name in lower case, with a dash for each run of anything
+// else ("Battle.net" is battle-net).
+export function omarchyIconName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 // The icon a native app's installed package gives it, or null.
 // A game platform Omarchy sets up itself, with no package of its own to
 // give it an icon, such as Battle.net, has the one Omarchy keeps for its
-// own app of that name, in Omarchy's folder (/usr/share/omarchy). So that
-// logo is read on the box too, and no repo of OrigaiTV's ships it.
+// own app of that name. Omarchy's package puts those in the hicolor theme
+// (battle-net.png), and an older one kept them in its own folder
+// (/usr/share/omarchy/applications/icons/Battle.net.png). So that logo is
+// read on the box too, and no repo of OrigaiTV's ships it.
 export function packageIcon(app: NativeApp & { name?: string }, dirs: string[] = DATA_DIRS): { path: string; type: string } | null {
   const entry = findEntry(app, dirs);
   const found = entry ? themeIcon(entry.Icon, dirs) : null;
   if (found || !app.name || !NAME.test(app.name)) return found;
+  const themed = omarchyIconName(app.name);
+  const omarchy = themed && NAME.test(themed) ? themeIcon(themed, dirs) : null;
+  if (omarchy) return omarchy;
   for (const dir of dirs) {
     const omarchy = usable(join(dir, "omarchy", "applications", "icons", `${app.name}.png`));
     if (omarchy) return omarchy;

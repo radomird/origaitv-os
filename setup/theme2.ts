@@ -1,7 +1,8 @@
 // Theme and background on one screen (D3, step 11 of 12), with setup's own
 // switch on. The top row is home in the look you picked, once in each of
 // Omarchy's themes, drawn by the launcher itself. OK on one sets it, as
-// Settings does, and the focus goes down to the backgrounds. The row under
+// Settings does, and the focus stays on it until you go down to the
+// backgrounds. The row under
 // it is the background: each of the theme's own pictures, the one Omarchy
 // shows being the default, your photos, a shared folder, or one your agent
 // will draw soon. Picking another of the theme's asks Omarchy to show it. OK on one picks it and
@@ -118,7 +119,6 @@ export async function themeBackground(ctx: Ctx): Promise<View> {
     if (setting || leaving) return;
     if (one.id === current) {
       ctx.sounds.play("confirm");
-      ctx.focus.set(backOf("theme"));
       return;
     }
     setting = one.id;
@@ -136,7 +136,6 @@ export async function themeBackground(ctx: Ctx): Promise<View> {
     current = one.id;
     ctx.sounds.play("confirm");
     draw();
-    ctx.focus.set(backOf("theme"));
   };
 
   // OK on a background picks it and finishes setup. Photos before there are
