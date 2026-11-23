@@ -25,9 +25,24 @@ echo "$name \$*" >>"$calls"
 [[ $name != omarchy-pkg-add ]] || [[ \$1 != broken-game ]]
 STUB
 done
+# -Sy fetches the package lists, unless $SCRATCH/offline says the box isn't
+# online, and -Sp names what an install would bring: the packages asked for,
+# and what $SCRATCH/upgrades says their lists want upgraded with them.
 cat >"$OMARCHY_PATH/bin/pacman" <<STUB
 #!/bin/bash
-grep -qx -- "\${3:-\$2}" "$SCRATCH/installed" 2>/dev/null
+case \$1 in
+  -Sy)
+    echo "pacman \$*" >>"$calls"
+    [[ ! -e $SCRATCH/offline ]] || exit 1
+    touch "\$ORIGAITV_PACMAN_SYNC/core.db" "\$ORIGAITV_PACMAN_SYNC/extra.db" "\$ORIGAITV_PACMAN_SYNC/multilib.db"
+    ;;
+  -Sp)
+    shift 5
+    printf '%s\n' "\$@"
+    [[ ! -s $SCRATCH/upgrades ]] || cat "$SCRATCH/upgrades"
+    ;;
+  *) grep -qx -- "\${3:-\$2}" "$SCRATCH/installed" 2>/dev/null ;;
+esac
 STUB
 # The box's repositories, each with its package list.
 cat >"$OMARCHY_PATH/bin/pacman-conf" <<'STUB'
@@ -91,12 +106,45 @@ app origaitv.flat official "$(native flatpak org.example.Game)"
 refused origaitv.flat "Can't install this kind of app yet"
 pass "only an official native app names a package, by a package name, and a refusal says why"
 
-# A box that hasn't fetched its package lists yet says to update it first.
+# A box straight from the ISO has no package lists: it fetches them, and
+# then installs, since nothing on it is older than they are.
 rm "$ORIGAITV_PACMAN_SYNC/multilib.db"
 app origaitv.later official "$(native pacman later-game)"
-refused origaitv.later "Update OrigaiTV in Settings first, then add the app again"
-touch "$ORIGAITV_PACMAN_SYNC/multilib.db"
-pass "a box without its package lists says to update it, and fetches none on the side"
+package origaitv.later || fail "a box without its package lists still installs" "$(cat "$SCRATCH/out")"
+[[ $(cat "$calls") == $'pacman -Sy --noconfirm\nomarchy-pkg-add later-game' ]] || fail "after fetching the lists" "$(cat "$calls")"
+[[ -f $ORIGAITV_PACMAN_SYNC/multilib.db ]] || fail "which are on the box after"
+package origaitv.later || fail "again" "$(cat "$SCRATCH/out")"
+! grep -q "pacman -Sy" "$calls" || fail "a box with its lists doesn't fetch them again" "$(cat "$calls")"
+pass "a box straight from the ISO fetches its package lists, then installs the program"
+
+# Offline, it says so for the TV.
+rm "$ORIGAITV_PACMAN_SYNC/multilib.db"
+touch "$SCRATCH/offline"
+if package origaitv.later; then
+  fail "a box that can't fetch its lists installs nothing" "$(cat "$SCRATCH/out")"
+fi
+[[ $(cat "$calls") == "pacman -Sy --noconfirm" ]] || fail "and only tried the lists" "$(cat "$calls")"
+[[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error") == "Couldn't download it. Check your internet, then try again." ]] || fail "and says why" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error")"
+rm "$SCRATCH/offline"
+pass "a box that can't fetch its package lists says to check the internet"
+
+# Lists newer than the system: a program that needs nothing upgraded still
+# installs, and one that would upgrade a package the box has doesn't, since
+# that's half an update.
+echo bash >"$SCRATCH/upgrades"
+if package origaitv.later; then
+  fail "a box older than the lists it just fetched installs nothing" "$(cat "$SCRATCH/out")"
+fi
+[[ $(cat "$calls") == "pacman -Sy --noconfirm" ]] || fail "past fetching the lists" "$(cat "$calls")"
+grep -q "bash would be upgraded on its own" "$SCRATCH/out" || fail "and the journal says which" "$(cat "$SCRATCH/out")"
+[[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error") == "Couldn't install it. Update your TV in Settings, under Updates, then try again." ]] || fail "and says to update" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error")"
+refused origaitv.later "Couldn't install it. Update your TV in Settings, under Updates, then try again."
+rm "$SCRATCH/upgrades"
+echo new-library >"$SCRATCH/upgrades"
+package origaitv.later || fail "a program whose packages are all new installs" "$(cat "$SCRATCH/out")"
+[[ $(cat "$calls") == "omarchy-pkg-add later-game" ]] || fail "as before" "$(cat "$calls")"
+rm "$SCRATCH/upgrades"
+pass "never half an update: a program that would upgrade a package the box has says to update first"
 
 app origaitv.broken official '{"name":"Broken Game","tv":{"runtime":"native","package":{"pacman":"broken-game"},"exec":["broken-game"]}}'
 if package origaitv.broken; then

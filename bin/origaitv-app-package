@@ -66,15 +66,32 @@ flatpak=$(jq -r '.tv.package.flatpak // empty' "$manifest" 2>/dev/null || true)
 [[ -n $pkg || -n $flatpak ]] || fail "it names no package"
 [[ -z $pkg || $pkg =~ ^[a-z0-9][a-z0-9@._+-]*$ ]] || fail "'$pkg' isn't a package name"
 
-# pacman installs only with every repository's package list on the box,
-# which the box's own updates fetch. This never fetches them on the side,
-# since lists newer than the system can break it.
+# pacman installs only with every repository's package list on the box. A
+# box straight from the ISO has none until its first update, and setup's own
+# update runs only when there's a newer OrigaiTV or Omarchy, so they're
+# fetched here when any is missing. What it never does is half an update,
+# which can break an Arch box: when installing the program would also
+# upgrade a package the box has, because the lists are newer than the
+# system, it says to update first, and Settings, Updates has that update.
 SYNC=${ORIGAITV_PACMAN_SYNC:-/var/lib/pacman/sync}
+# synced <package>...: the lists, and whether these install on their own.
 synced() {
-  local repo
+  local repo missing=0 each
   for repo in $(pacman-conf --repo-list 2>/dev/null); do
-    [[ -f $SYNC/$repo.db ]] || fail "Update OrigaiTV in Settings first, then add the app again"
+    [[ -f $SYNC/$repo.db ]] || missing=1
   done
+  if (( missing )); then
+    echo "origaitv-app-package: fetching the package lists, which this box doesn't have yet"
+    pacman -Sy --noconfirm >&2 || fail "Couldn't download $name. Check your internet, then try again."
+  fi
+  # Everything pacman would install for them, each by its name.
+  while IFS= read -r each; do
+    [[ -n $each ]] || continue
+    if pacman -Q -- "$each" >/dev/null 2>&1; then
+      echo "origaitv-app-package: $each would be upgraded on its own, so nothing is installed" >&2
+      fail "Couldn't install $name. Update your TV in Settings, under Updates, then try again."
+    fi
+  done < <(pacman -Sp --noconfirm --print-format '%n' -- "$@" 2>/dev/null || true)
 }
 
 # missing <package>...: the ones pacman doesn't have.
@@ -119,7 +136,7 @@ if [[ -n $flatpak ]]; then
     exit 0
   fi
   if [[ -n $(missing flatpak) ]]; then
-    synced
+    synced flatpak
     omarchy-pkg-add flatpak || fail "Couldn't install $name. Try again later."
   fi
   # Its runtime comes from Flathub, and the app from its maker's own
@@ -183,7 +200,7 @@ mapfile -t wanted < <(missing "${packages[@]}")
 if (( ${#wanted[@]} == 0 )); then
   echo "origaitv-app-package: $pkg is installed already"
 else
-  synced
+  synced "${wanted[@]}"
   if $lib32; then
     omarchy-install-gaming-gpu-lib32 || fail "Couldn't install this app's graphics drivers"
   fi
