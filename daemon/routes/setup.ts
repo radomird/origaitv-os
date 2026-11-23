@@ -146,6 +146,21 @@ export class SetupRoutes {
       return true;
     }
 
+    // A screen setup's page couldn't show after its tries, for the TV's log:
+    // what it was and why, in a line.
+    if (method === "POST" && on === "tv" && path === "/api/setup/log") {
+      const body = ((await this.host.body(request)) ?? {}) as { route?: unknown; tries?: unknown; why?: unknown };
+      const text = (value: unknown, most: number) => (typeof value === "string" ? value.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, most) : "");
+      const route = text(body.route, 40);
+      if (!route) {
+        this.host.json(response, 400, { ok: false, error: "send the screen's route" });
+        return true;
+      }
+      this.host.log(`setup couldn't show ${route} after ${Number(body.tries) || 0} tries: ${text(body.why, 200) || "no reason given"}`);
+      this.host.json(response, 200, { ok: true });
+      return true;
+    }
+
     // Where the location step starts, and every country to pick from.
     if (method === "GET" && path === `${prefix}/location`) {
       this.host.json(response, 200, { ok: true, ...(await this.where(await this.state())), countries: await countries() });
