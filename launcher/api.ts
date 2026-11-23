@@ -76,6 +76,11 @@ export interface VoiceState {
 
 export interface HomeState {
   version: string;
+  // The release this TV runs, 1.0.0-rc4, or null on a build with none, and
+  // the release it was installed from, which stays once edge moves it on
+  // (daemon/release.ts).
+  release?: string | null;
+  installedFrom?: string | null;
   channel: string;
   viewer: Viewer;
   viewers: Viewer[];

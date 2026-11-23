@@ -26,6 +26,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { stripTypeScriptTypes } from "node:module";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { APPS_TILE, gridNamed, Home, type TileAnswer } from "./home.ts";
+import type { ProgramPlaces } from "./program.ts";
 import { origaitvOwner, installedPackage, userAgent } from "./identity.ts";
 import { Ai, OFFERS, planRefused, PROVIDER_LIST, TERMS_READ, type Provider } from "./ai.ts";
 import { ARCHIVES, ArtArchives, type ArtOptions } from "./art.ts";
@@ -98,6 +99,7 @@ import { discoverRoute, serverPickRoute } from "./routes/discover.ts";
 import { ServerPicks } from "./server-picks.ts";
 import { DisplayRoutes } from "./routes/display.ts";
 import { Inhibitor } from "./inhibit.ts";
+import { installedRelease, running, type Running } from "./release.ts";
 
 export interface DaemonOptions {
   root: string; // OrigaiTV's files: /usr/share/origaitv, or a checkout
@@ -128,6 +130,11 @@ export interface DaemonOptions {
   keyWaitMs?: number;
   // The channel `origaitv channel` sets: /etc/origaitv/channel (ADR-053).
   channelFile?: string;
+  // The release the ISO installed, /etc/origaitv/release (daemon/release.ts),
+  // and the package's settings, its version among them, which are in root
+  // unless a test puts them elsewhere.
+  releaseFile?: string;
+  settingsFile?: string;
   // How long a phone's controller lasts with nothing sent, and how long
   // the input helper has to make one, for tests (daemon/pads.ts).
   pads?: Pick<PadsOptions, "quietMs" | "openMs">;
@@ -147,6 +154,9 @@ export interface DaemonOptions {
   // Where packages put their desktop entries and icons, for a native app's
   // icon: /usr/local/share, /usr/share and flatpak's.
   dataDirs?: string[];
+  // Where pacman and flatpak keep what's installed: whether a native app's
+  // program is on the box.
+  programs?: ProgramPlaces;
   // The backgrounds and their credits: /var/lib/origaitv/backgrounds.
   backgrounds?: string;
   // What phones shared to the TV (ADR-050): /var/lib/origaitv/shared.
@@ -470,6 +480,7 @@ export class Daemon {
       newTile: (viewer, size) => this.newTile(viewer, size),
       log: this.log,
       dataDirs: options.dataDirs,
+      programs: options.programs,
     });
     // A sentence said to the TV: routed for who's watching, with only the
     // apps they can open, and done through the TV session.
@@ -790,7 +801,7 @@ export class Daemon {
 
   private async settings(): Promise<Record<string, string>> {
     const values: Record<string, string> = { ORIGAITV_VERSION: "dev", ORIGAITV_CHANNEL: "dev", ORIGAITV_INDEX_URL: "" };
-    const text = await readFile(join(this.options.root, "settings"), "utf8").catch(() => "");
+    const text = await readFile(this.options.settingsFile ?? join(this.options.root, "settings"), "utf8").catch(() => "");
     for (const line of text.split("\n")) {
       const at = line.indexOf("=");
       if (at > 0 && line.slice(0, at) in values) values[line.slice(0, at)] = line.slice(at + 1).trim();
@@ -806,6 +817,14 @@ export class Daemon {
     const plans = Object.values(await this.ai.offers()).filter((offer) => offer.plan.offered).map((offer) => ({ provider: offer.provider, name: offer.plan.name }));
     const ai = await this.ai.read();
     return { set, provider, plans, ai: { provider: ai.provider, path: ai.path, accepted: ai.accepted !== null, ...(ai.models ? { models: ai.models } : {}) } };
+  }
+
+  // The release this box runs, and the one it was installed from, for
+  // Settings, System (daemon/release.ts): the package's version on stable,
+  // the ISO's release while the box runs the build it carried, or null once
+  // edge has moved it on.
+  private async release(info: Record<string, string>): Promise<Running> {
+    return running(info.ORIGAITV_VERSION, await installedRelease(this.options.releaseFile));
   }
 
   // The channel this box updates from, as `origaitv channel` says it: the one
@@ -2737,6 +2756,7 @@ export class Daemon {
         ok: true,
         service: "origaitv",
         version: info.ORIGAITV_VERSION,
+        ...(await this.release(info)),
         channel: info.ORIGAITV_CHANNEL,
         // What this process runs, which after an update and before OrigaiTV's
         // services restart is still the package from before (origaitv-restart).
@@ -2769,7 +2789,7 @@ export class Daemon {
 
     if (method === "GET" && path === "/api/state") {
       const [info, setup] = await Promise.all([this.settings(), this.setup()]);
-      this.json(response, 200, { ok: true, version: info.ORIGAITV_VERSION, channel: info.ORIGAITV_CHANNEL, setup });
+      this.json(response, 200, { ok: true, version: info.ORIGAITV_VERSION, ...(await this.release(info)), channel: info.ORIGAITV_CHANNEL, setup });
       return;
     }
 
@@ -2965,6 +2985,7 @@ export class Daemon {
       this.json(response, 200, {
         ok: true,
         version: info.ORIGAITV_VERSION,
+        ...(await this.release(info)),
         channel: info.ORIGAITV_CHANNEL,
         setup,
         viewer,

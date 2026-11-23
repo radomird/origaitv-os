@@ -16,6 +16,25 @@ else
   echo "OrigaiTV dev ($(git -C "$ORIGAITV_PATH" rev-parse --short HEAD 2>/dev/null || echo unknown))"
 fi
 
+# What it runs, by the same rule as Settings, System (daemon/release.ts):
+# the release the USB stick was, while the box runs the build the stick
+# carried, or once an update on edge has moved it past that build, edge,
+# installed from that release. Nothing more on stable, whose own version is
+# the release, or on a box with no release.
+release_file=${ORIGAITV_RELEASE_FILE:-/etc/origaitv/release}
+release_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc[1-9][0-9]*)?$'
+if [[ -r $release_file && ! ${ORIGAITV_VERSION:-} =~ $release_re ]]; then
+  release=$(sed -n '1{s/[[:space:]]//g;p;}' "$release_file")
+  shipped=$(sed -n '2{s/[[:space:]]//g;p;}' "$release_file")
+  if [[ $release =~ $release_re ]]; then
+    if [[ -z $shipped || $shipped == "${ORIGAITV_VERSION:-}" ]]; then
+      echo "Release $release"
+    else
+      echo "Edge channel, installed from $release"
+    fi
+  fi
+fi
+
 if type -P omarchy-version >/dev/null; then
   echo "Omarchy $(omarchy-version)"
 fi

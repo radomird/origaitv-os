@@ -10,7 +10,7 @@
 // harness's stand-in (box.mts), as for the other app tests.
 
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -240,6 +240,40 @@ test("T23.1 adding two games: the second waits its turn, both land on home's Gam
   }
 });
 
+test("a game whose program didn't install says why, never that it couldn't be removed, isn't on home, and OK tries again", async () => {
+  await useLook("glass");
+  const why = "Couldn't install Battle.net. Update your TV in Settings, under Updates, then try again.";
+  APPS_MOVER.installFails = { "origaitv.battlenet": why };
+  const page = await tv();
+  try {
+    await openGames(page);
+    await page.keyboard.press("Enter");
+    await moveTo(page, "origaitv.battlenet");
+    await page.keyboard.press("Enter");
+    await toast(page, "Adding Battle.net…");
+    // Root's step and the daemon's next look come first.
+    await page.waitForFunction(() => document.querySelector('.panel [data-action="game-origaitv.battlenet"] .button-value')?.textContent === "Couldn't install · Try again", undefined, { timeout: 10000 });
+    await toast(page, why);
+    assert.ok(!(await page.locator(row("origaitv.battlenet")).innerText()).includes("remove"), "its row never says it couldn't be removed");
+    const home = await (await fetch(`${url}/api/home`)).json();
+    assert.ok(!(home.apps as { id: string }[]).some((app) => app.id === "origaitv.battlenet"), "home has no tile for it");
+    // Once its program can install, OK on the row adds it.
+    APPS_MOVER.installFails = {};
+    await page.keyboard.press("Enter");
+    await toast(page, "Adding Battle.net…");
+    await page.waitForFunction(() => document.querySelector('.panel [data-action="game-origaitv.battlenet"] .button-value')?.textContent === "Remove", undefined, { timeout: 10000 });
+    const after = await (await fetch(`${url}/api/home`)).json();
+    assert.ok((after.apps as { id: string }[]).some((app) => app.id === "origaitv.battlenet"), "and home has it");
+    // Back as it was for the tests after.
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector('.panel [data-action="game-origaitv.battlenet"] .button-value')?.textContent === "Add", undefined, { timeout: 10000 });
+  } finally {
+    APPS_MOVER.installFails = {};
+    await page.close();
+  }
+});
+
 test("T23.1 a game that needs a mouse and keyboard says so on its home tile, in every look, with nothing cut off", async () => {
   for (const look of ["terminal", "glass", "cinema"] as const) {
     await useLook(look);
@@ -366,6 +400,73 @@ async function atApps(goal: string, box: string): Promise<{ page: Page; close: (
     },
   };
 }
+
+test("Steam, Battle.net and RetroArch picked in setup each show their own icon on home, never two letters", async () => {
+  const started = await startBox(0, undefined, { catalog: CATALOG, box: { machine: machine("nuc8i5beh") } });
+  const post = (path: string, body: unknown) => fetch(`${started.url}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  // As root leaves the box: each one's package in, with what it brings.
+  // Steam's and RetroArch's packages give a desktop entry and an icon.
+  // Battle.net has no package of its own to, so its icon is the one
+  // Omarchy's package puts in the hicolor theme as battle-net.png.
+  const share = join(started.state, "..", "share");
+  const hicolor = join(share, "icons", "hicolor");
+  mkdirSync(join(hicolor, "256x256", "apps"), { recursive: true });
+  mkdirSync(join(hicolor, "scalable", "apps"), { recursive: true });
+  mkdirSync(join(share, "applications"), { recursive: true });
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/p+2yWQAAAABJRU5ErkJggg==", "base64");
+  writeFileSync(join(hicolor, "256x256", "apps", "steam.png"), png);
+  writeFileSync(join(share, "applications", "steam.desktop"), "[Desktop Entry]\nName=Steam\nExec=/usr/bin/steam %U\nIcon=steam\n");
+  writeFileSync(join(hicolor, "scalable", "apps", "retroarch.svg"), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>');
+  writeFileSync(join(share, "applications", "com.libretro.RetroArch.desktop"), "[Desktop Entry]\nName=RetroArch\nExec=retroarch\nIcon=retroarch\n");
+  writeFileSync(join(hicolor, "256x256", "apps", "battle-net.png"), png);
+  const pacman = join(started.state, "..", "pacman-local");
+  for (const pkg of ["steam-1.0.0.85-1", "retroarch-1.21.0-1", "umu-launcher-1.2.9-1"]) mkdirSync(join(pacman, pkg), { recursive: true });
+  APPS_MOVER.native = {
+    "origaitv.steam": { package: { pacman: "steam" }, exec: ["steam", "-gamepadui"] },
+    "origaitv.battlenet": { package: { pacman: "umu-launcher" }, exec: ["origaitv-battlenet"] },
+    "origaitv.retroarch": { package: { pacman: "retroarch" }, exec: ["retroarch"] },
+  };
+  const picked = ["origaitv.steam", "origaitv.battlenet", "origaitv.retroarch"];
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    // Setup, to its apps, for gaming, and the three picked there.
+    await post("/api/setup", { done: false });
+    await post("/api/setup/finish", { step: "welcome", keyboard: true });
+    await post("/api/setup/ready", { update: "none" });
+    for (const step of ["ready", "box", "country", "ai", "people"]) await post("/api/setup/finish", { step });
+    await post("/api/setup/goal", { goal: "gaming" });
+    await post("/api/setup/finish", { step: "goal" });
+    assert.equal((await post("/api/setup/apps", { install: picked })).status, 200);
+    for (let tries = 0; ; tries++) {
+      const home = await (await fetch(`${started.url}/api/home`)).json();
+      const here = (home.apps as { id: string }[]).filter((app) => picked.includes(app.id));
+      if (here.length === picked.length) break;
+      assert.ok(tries < 50, `all three land on home: ${here.map((app) => app.id)}`);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    await post("/api/setup", { done: true });
+    const home = await (await fetch(`${started.url}/api/home`)).json();
+    for (const id of picked) assert.equal((home.apps as { id: string; icon?: string }[]).find((app) => app.id === id)?.icon, `/api/apps/${id}/icon`, `${id} has its own icon`);
+    // On home's tiles, each draws its icon, not its letters.
+    await page.addInitScript(() => {
+      (window as unknown as { origaitvScreen: (json: string) => void }).origaitvScreen = () => {};
+    });
+    await page.goto(`${started.url}/?size=standard`);
+    await page.waitForSelector("html[data-look] #page .focused");
+    for (const id of picked) {
+      const tile = page.locator(`.tile[data-id="${id}"] .logo`).first();
+      await tile.waitFor();
+      assert.equal(await tile.locator("img").count(), 1, `${id}'s tile draws its icon`);
+      assert.equal((await tile.innerText()).trim(), "", `and no letters`);
+      assert.ok(await tile.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0), `${id}'s icon loads`);
+    }
+  } finally {
+    APPS_MOVER.native = {};
+    await page.close();
+    await started.daemon.close();
+  }
+});
 
 const groups = (page: Page) => page.locator(".app-group:not(.hidden) .app-head").allInnerTexts();
 const group = (page: Page, head: string) => page.locator(".app-group", { has: page.locator(".app-head", { hasText: head }) });

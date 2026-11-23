@@ -18,6 +18,7 @@ import type { Ledger, WatchRow } from "./ledger.ts";
 import { legible, modeOf } from "./legible.ts";
 import { boxZone, cities, cityOf, placeSettings, type City } from "./place.ts";
 import { DATA_DIRS, packageIcon } from "./package-icon.ts";
+import { PROGRAM_PLACES, programHere, type ProgramPlaces } from "./program.ts";
 import { siteIcon } from "./site-icon.ts";
 
 // Where an app came from: the signed index, this box's agent, or OrigaiTV
@@ -305,6 +306,9 @@ export interface HomeOptions {
   // Where packages put their desktop entries and icons, for a native app's
   // icon: /usr/local/share, /usr/share and flatpak's.
   dataDirs?: string[];
+  // Where pacman and flatpak keep what's installed, for whether a native
+  // app's program is on the box.
+  programs?: ProgramPlaces;
 }
 
 // How long before a site's icon that didn't come is asked for again.
@@ -377,6 +381,7 @@ export class Home {
   // TV is online after a start.
   private waiting = new Set<string>();
   private dataDirs: string[];
+  private programs: ProgramPlaces;
 
   constructor(options: HomeOptions) {
     this.appsDir = options.appsDir;
@@ -394,6 +399,7 @@ export class Home {
     this.pageTile = options.pageTile;
     this.newTile = options.newTile;
     this.dataDirs = options.dataDirs ?? DATA_DIRS;
+    this.programs = options.programs ?? PROGRAM_PLACES;
   }
 
   // --- The viewer -------------------------------------------------------
@@ -467,7 +473,11 @@ export class Home {
     const signIns = await this.signIns();
     const children = await this.childrenApps();
     const profiles = await this.allServiceProfiles();
-    const all = (await this.manifests()).map(({ manifest, tier, thisBox }): AppSummary => {
+    // An official native app whose program didn't install, such as Steam
+    // when its package couldn't be fetched, isn't on the TV: no tile, and
+    // Settings offers to add it again.
+    const here = (await this.manifests()).filter(({ manifest }) => manifest.tv.runtime !== "native" || programHere(manifest.tv, this.programs));
+    const all = here.map(({ manifest, tier, thisBox }): AppSummary => {
       const values = settings[manifest.id] ?? {};
       const builtin = tier === "built-in";
       const fields = (manifest.tv.setup ?? []).filter((step) => step.type === "field");
