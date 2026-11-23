@@ -76,3 +76,12 @@ export function legible(css: string): string {
   }
   return lines.length ? css.replace(/\n?\}\s*$/, `\n${lines.join("\n")}\n}\n`) : css;
 }
+
+// Whether a theme is light or dark, from its own colours: light when its
+// background is lighter than the words on it. Dark is what a theme is when
+// either isn't a plain hex colour.
+export function modeOf(background: string | undefined, foreground: string | undefined): "dark" | "light" {
+  const back = background ? rgb(background) : null;
+  const words = foreground ? rgb(foreground) : null;
+  return back && words && luminance(back) > luminance(words) ? "light" : "dark";
+}
