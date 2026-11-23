@@ -328,7 +328,9 @@ ShellRoot {
       right: true
       bottom: true
     }
-    implicitHeight: 220
+    // The bar and the TV's 60 px safe area under it, and a 24 px gap above
+    // it. Nothing else: the page fills the rest of the screen.
+    implicitHeight: 196
     color: "#101014"
     exclusionMode: ExclusionMode.Auto
     WlrLayershell.namespace: "origaitv-signin"
@@ -342,7 +344,7 @@ ShellRoot {
         bottom: parent.bottom
         leftMargin: 32
         rightMargin: 32
-        bottomMargin: 84
+        bottomMargin: 60
       }
       height: 112
       color: "#1a1b26"
@@ -416,36 +418,6 @@ ShellRoot {
           anchors.fill: parent
           onClicked: signedIn.running = true
         }
-      }
-    }
-
-    Rectangle {
-      anchors {
-        left: parent.left
-        right: parent.right
-        bottom: parent.bottom
-      }
-      height: 60
-      color: "#16161e"
-
-      Text {
-        anchors.left: parent.left
-        anchors.leftMargin: 32
-        anchors.verticalCenter: parent.verticalCenter
-        text: "App setup · " + root.signingIn
-        color: "#a9b1d6"
-        font.family: "JetBrainsMono Nerd Font"
-        font.pixelSize: 24
-      }
-
-      Text {
-        anchors.right: parent.right
-        anchors.rightMargin: 32
-        anchors.verticalCenter: parent.verticalCenter
-        text: "Home stops"
-        color: "#a9b1d6"
-        font.family: "JetBrainsMono Nerd Font"
-        font.pixelSize: 24
       }
     }
   }

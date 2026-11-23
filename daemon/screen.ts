@@ -1121,18 +1121,15 @@ export class Screen {
     );
   }
 
-  // Maximized: the whole screen less the monitor's reserved area. Told it's
-  // maximized, as the app whose sign-in screen is up is.
-  private maximize(address: string): Promise<void> {
-    return this.hypr.dispatch(`hl.dsp.window.fullscreen_state({ window = ${lua(`address:${address}`)}, internal = 1, client = 0, action = "set" })`);
-  }
-
-  // Inside Fit to screen's margin: maximized, so it fills the reserved area,
-  // but told it's full screen, as it was before there was a margin. A page's
-  // own full screen, a player's, is then the page's alone, inside the window,
-  // and Escape leaves it as it always did: told it isn't full screen,
-  // Chromium asks the compositor, which the held window rule ignores, and a
-  // player's full screen never ends. Gamescope gets what it asks for too.
+  // Inside Fit to screen's margin, or above the sign-in bar: maximized, so
+  // it fills the reserved area, but told it's full screen, as it was before
+  // there was a margin. A page's own full screen, a player's, is then the
+  // page's alone, inside the window, and Escape leaves it as it always did:
+  // told it isn't full screen, Chromium asks the compositor, which the held
+  // window rule ignores, and a player's full screen never ends. Gamescope
+  // gets what it asks for too. And Chromium keeps its own bars hidden: a
+  // window it opened for a second app is an ordinary browser window, which
+  // told it's only maximized shows its tabs and its address bar.
   private fit(address: string): Promise<void> {
     return this.hypr.dispatch(`hl.dsp.window.fullscreen_state({ window = ${lua(`address:${address}`)}, internal = 1, client = 2, action = "set" })`);
   }
@@ -1147,7 +1144,7 @@ export class Screen {
   // inside the margin (launcher/size.ts).
   private place(address: string): Promise<void> {
     const entry = this.opens.find((o) => o.address === address);
-    if (this.signingIn && entry?.id === this.signingIn.id) return this.maximize(address);
+    if (this.signingIn && entry?.id === this.signingIn.id) return this.fit(address);
     if (this.windows.get(address)?.role !== "home" && this.fitted()) return this.fit(address);
     return this.fullscreen(address);
   }

@@ -952,7 +952,7 @@ function fakeSignIn(answer: { now?: boolean | null; starts?: boolean } = {}) {
   return { signIn, calls };
 }
 
-test("ADR-032 a tile that says Sign in opens the app maximized over OrigaiTV's sign-in bar, until the app says it's signed in", async () => {
+test("ADR-032 T30.11 a tile that says Sign in opens the app maximized over OrigaiTV's sign-in bar, told it's full screen, until the app says it's signed in", async () => {
   const { signIn, calls } = fakeSignIn();
   const t = await tv({ signIn });
   t.launcher.targets.set("origaitv.tube", { runtime: "web", url: "https://tube.example/", name: "Tube" });
@@ -964,6 +964,14 @@ test("ADR-032 a tile that says Sign in opens the app maximized over OrigaiTV's s
   await t.screen.idle();
   assert.equal(t.screen.front()?.address, "0xd");
   assert.equal(t.hypr.get("0xd").fullscreen, 1, "maximized, above the bar");
+  // Told it's full screen, so Chromium shows none of its own bars: a window
+  // it opened for a second app is an ordinary one, with tabs and an address
+  // bar, once it's told it's only maximized.
+  assert.ok(
+    t.hypr.dispatched.includes('hl.dsp.window.fullscreen_state({ window = "address:0xd", internal = 1, client = 2, action = "set" })'),
+    "told it's full screen",
+  );
+  assert.ok(!t.hypr.dispatched.some((line) => line.includes("client = 0")), "and never told it's only maximized");
   // Opening it for a sign-in doesn't also ask it whether it's signed in.
   assert.deepEqual(calls.checked, []);
   calls.done!(true);
