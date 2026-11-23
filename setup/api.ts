@@ -10,6 +10,8 @@ export type { Country, CountryState };
 export type Step = "welcome" | "ready" | "box" | "country" | "ai" | "people" | "goal" | "apps" | "look" | "theme" | "background";
 export type Goal = "streaming" | "music" | "media" | "gaming";
 export type UpdateFirst = "checking" | "installing" | "done" | "none" | "failed" | "skipped";
+// Why the update at getting ready didn't go ahead (daemon/setup.ts).
+export type UpdateWhy = "offline" | "busy" | "untested" | "space" | "mirror" | "halfway" | "unchanged" | "stalled" | "check" | "start" | "waiting";
 
 export interface SetupState {
   done: boolean;
@@ -17,7 +19,7 @@ export interface SetupState {
   finished: Partial<Record<Step, string>>;
   keyboard: boolean;
   goal: Goal | null;
-  ready: { asked: string | null; update: UpdateFirst | null; from: string | null; to: string | null };
+  ready: { asked: string | null; update: UpdateFirst | null; from: string | null; to: string | null; boot: string | null; why: UpdateWhy | null };
   // The apps asked for at "+ add your own", kept for later.
   wishes: string[];
   // The soundtrack muted (S5.4).
@@ -82,6 +84,8 @@ export interface SetupInfo {
   stickPhone?: boolean;
   // An adult PIN is set, as on a box whose setup was started again.
   pin: boolean;
+  // This boot's id, so getting ready can tell the TV restarted.
+  boot: string;
 }
 
 export type Provider = "claude" | "chatgpt" | "gemini" | "grok" | "muse";
@@ -178,7 +182,7 @@ export const setup = {
   go: async (step: Step) => (await call<{ setup: SetupState }>("POST", "/api/setup/step", { step })).setup,
   finish: async (step: Step, change: { keyboard?: boolean } = {}) => (await call<{ setup: SetupState }>("POST", "/api/setup/finish", { step, ...change })).setup,
   goal: async (goal: Goal) => (await call<{ setup: SetupState }>("POST", "/api/setup/goal", { goal })).setup,
-  ready: async (change: { update: UpdateFirst; from?: string | null; to?: string | null }) => (await call<{ setup: SetupState }>("POST", "/api/setup/ready", change)).setup,
+  ready: async (change: { update: UpdateFirst; from?: string | null; to?: string | null; why?: UpdateWhy | null }) => (await call<{ setup: SetupState }>("POST", "/api/setup/ready", change)).setup,
   done: () => call<{ setup: SetupState }>("POST", "/api/setup", { done: true }),
   networks: async () => (await call<{ networks: Network[] }>("GET", "/api/setup/networks")).networks,
   wifi: (ssid: string, password: string) => call<{ joining: string }>("POST", "/api/setup/wifi", { ssid, password }),

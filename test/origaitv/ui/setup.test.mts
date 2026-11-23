@@ -407,8 +407,8 @@ test("getting ready carries on with the version it has when there's nothing newe
   await page.keyboard.press("Enter");
   await requested(page, "update-check");
   writeFileSync(join(updates, "status.json"), JSON.stringify({ checked_at: now(), ok: true, channel: "stable", waiting: true, origaitv: { installed: "0.2.1-1", available: "0.3.0-1" }, omarchy: { installed: "4.0.6-1", available: null }, packages: 0, security: false, notes: { origaitv: [], origaitv_date: null, omarchy: [] } }));
-  await page.waitForFunction(() => document.querySelector(".ready-line")?.textContent === "Up to date", null, { timeout: 10_000 });
-  assert.match(await textOf(page, ".ready-list"), /\[x\] origaitv 0\.2\.1 · up to date/, "an update the nightly run hasn't passed waits");
+  await page.waitForFunction(() => document.querySelector(".ready-line")?.textContent === "Your TV is up to date for now. Newer updates come later.", null, { timeout: 10_000 });
+  assert.match(await textOf(page, ".ready-list"), /\[x\] origaitv 0\.2\.1 · up to date for now/, "an update the nightly run hasn't passed waits");
   await page.waitForSelector(COUNTRY, { timeout: 5000 });
   await page.close();
 
@@ -417,7 +417,7 @@ test("getting ready carries on with the version it has when there's nothing newe
   await again.keyboard.press("Enter");
   await requested(again, "update-check");
   writeFileSync(join(updates, "status.json"), JSON.stringify({ checked_at: now(), ok: false, channel: "stable", origaitv: { installed: "0.2.1-1", available: null }, omarchy: { installed: null, available: null }, packages: 0, security: false, notes: { origaitv: [], origaitv_date: null, omarchy: [] } }));
-  await again.waitForFunction(() => /^Couldn't update\. Try later in Settings\.$/.test(document.querySelector(".ready-line")?.textContent ?? ""), null, { timeout: 10_000 });
+  await again.waitForFunction(() => /^Couldn't check for updates\. Try later in Settings\.$/.test(document.querySelector(".ready-line")?.textContent ?? ""), null, { timeout: 10_000 });
   assert.match(await textOf(again, ".ready-list"), /\[!\] origaitv 0\.2\.1 · couldn't update/);
   // Enter carries on at once.
   await again.keyboard.press("Enter");
