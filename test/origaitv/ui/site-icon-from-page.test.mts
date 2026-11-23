@@ -161,9 +161,10 @@ test("T30.10 a site that refuses the daemon: letters at first, then its icon rea
   const kept = await fetch(`${url}/api/apps/${APP}/site-icon`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(icon) });
   assert.deepEqual(await kept.json(), { ok: true });
   assert.deepEqual(await (await fetch(`${url}/api/apps/${APP}/site-icon`)).json(), { ok: true, wanted: false });
-  const src = `/api/apps/${APP}/icon`;
-  assert.deepEqual(await tiles(), { home: src, apps: src }, "home and Apps show its icon");
-  const served = await fetch(`${url}${src}`);
+  const shown = await tiles();
+  assert.match(shown.home, new RegExp(`^/api/apps/${APP.replace(".", "\\.")}/icon\\?v=`), "home shows its icon");
+  assert.equal(shown.apps, shown.home, "and so does Apps");
+  const served = await fetch(`${url}${shown.home}`);
   assert.equal(served.headers.get("content-type"), "image/png");
   assert.ok(Buffer.from(await served.arrayBuffer()).equals(PNG));
   assert.deepEqual(errors, []);
