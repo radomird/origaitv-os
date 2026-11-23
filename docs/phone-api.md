@@ -684,6 +684,17 @@ These act on the update in the state's `update` field. It's `null` when there's 
 | `GET /api/phone/ai/sign-in` | None | `{ok, signIn}`: how the plan's sign-in stands, or `null` | Anyone |
 | `POST /api/phone/ai/sign-in/code` | `{code}`: the code the provider's page gave | `{ok}` | Grant |
 
+#### Setup's AI step on a phone
+
+Any paired phone can take setup's AI step from start to end, with nothing pressed on the TV. The phone's page does it today, and the iPhone app will draw the same from the same state. Here's what a phone shows, in order, from the state's [`ai`](#ai) and `setup`:
+
+1. **The terms.** With `ai.ask` at `"terms"`, show `ai.name`'s terms: `summary`, a link to each of `terms`, and an accept button. Accepting sends `POST /api/phone/terms` with `ai.provider` and `ai.path` as they are. It's an adult's, past the PIN once there is one.
+2. **The sign-in, for a plan.** Accepting a plan's terms starts its sign-in on the TV right away. For a second or two `ai` is `null` while it starts, and `setup.step` is still `"ai"`. Then `ai.ask` is `"sign-in"`, with `ai.signIn`: open `url` in the browser, and either show `code` for the person to enter there, or take the code the page gives back and send it with `POST /api/phone/ai/sign-in/code`.
+3. **The key, for a key.** With `ai.ask` at `"key"`, take the key and send it with `POST /api/phone/key`.
+4. **Done.** Once the plan is signed in, `ai` goes back to `null` and setup moves on by itself: `setup.step` is `"people"` on the next state. The state that first finds the sign-in done can still say `"ai"`, but its `version` is a count behind, so the next ask answers at once. Once a key is saved, `ai` is `null` too, and the TV says it's ready, with Continue to move on.
+
+Keep showing the step until `ai` is `null` and `setup.step` has moved on, or the person puts it off. Putting it off leaves it to the TV, which shows the same sign-in. Every change here wakes the long poll, so a phone that's waiting hears it within a second.
+
 ### Builds and export
 
 Every route under `/api/phone/builds` answers `403` on a child's profile.
