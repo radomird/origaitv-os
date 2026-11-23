@@ -269,8 +269,17 @@ export const OFFICIAL = [
 // installs the Xbox controller driver, which here only says it did.
 // APPS_MOVER_MS is how long each takes, which a test can lengthen to see a
 // queue. With removeFails, a removal leaves the app where it was, as root
-// does when it can't take one off.
-export const APPS_MOVER = { ms: 400, restart: false, removeFails: false };
+// does when it can't take one off. installFails names apps whose program
+// doesn't install, with why: root takes such an app off again.
+// native names the apps that install as a program of their own, with the
+// package and command their manifest says.
+export const APPS_MOVER = {
+  ms: 400,
+  restart: false,
+  removeFails: false,
+  installFails: {} as Record<string, string>,
+  native: {} as Record<string, { package: { pacman: string }; exec: string[] }>,
+};
 function appsMover(state: string, apps: string, status: string, catalog: IndexEntry[]): void {
   const drop = join(state, "apps-drop", "install.json");
   let going = false;
@@ -311,6 +320,10 @@ function appsMover(state: string, apps: string, status: string, catalog: IndexEn
         delete now.apps[id];
       }
       for (const id of ids) {
+        if (APPS_MOVER.installFails[id]) {
+          now.apps[id] = { state: "failed", error: APPS_MOVER.installFails[id] };
+          continue;
+        }
         const app = catalog.find((a) => a.id === id)!;
         const target = join(apps, id);
         cpSync(SAMPLE, target, { recursive: true });
@@ -321,7 +334,15 @@ function appsMover(state: string, apps: string, status: string, catalog: IndexEn
         if (app.category) manifest.tv.category = app.category;
         // A game has nothing to set up and no sign-in of the TV's: a page
         // of its own stands in for it.
-        if (app.category === "games") {
+        if (APPS_MOVER.native[id]) {
+          // A program of its own, as Steam is.
+          manifest.tv.runtime = "native";
+          delete manifest.tv.homeUrl;
+          delete manifest.tv.origins;
+          delete manifest.tv.icon;
+          delete manifest.tv.tiles;
+          Object.assign(manifest.tv, APPS_MOVER.native[id], { setup: [], capabilities: ["launch"] });
+        } else if (app.category === "games") {
           Object.assign(manifest.tv, { homeUrl: "https://game.example/", origins: ["https://game.example"], setup: [], capabilities: ["launch"] });
           delete manifest.tv.tiles;
         }
@@ -406,6 +427,9 @@ export async function startBox(
     shared: join(state, "..", "shared"),
     // No packages' desktop entries or icons until a test puts some there.
     dataDirs: [join(state, "..", "share")],
+    // What pacman and flatpak have installed: no pacman, so every program
+    // counts as there, until a test makes the folder.
+    programs: { pacman: join(state, "..", "pacman-local"), flatpak: join(state, "..", "flatpak-app") },
     art: options.art,
     // The builder's folders, empty until a test plays root's part in them.
     builds: join(state, "..", "build"),

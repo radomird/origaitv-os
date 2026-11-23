@@ -322,6 +322,34 @@ test("T23.1 Settings' Games page lists every game, on the TV or not, with how ea
   );
 });
 
+test("a game whose install didn't work never says it couldn't be removed, and one whose removal didn't still does", async () => {
+  const dir = join(scratch, "games-failed");
+  const statusPath = join(dir, "run", "state.json");
+  mkdirSync(join(dir, "run"), { recursive: true });
+  // As root left them on rc4: Steam's and Battle.net's apps in, their
+  // programs not, and RetroArch's taken off again; Moonlight's removal
+  // didn't work.
+  writeFileSync(
+    statusPath,
+    JSON.stringify({
+      apps: {
+        "origaitv.steam": { state: "failed", error: "Couldn't install Steam. Update your TV in Settings, under Updates, then try again." },
+        "origaitv.retroarch": { state: "failed", error: "Couldn't install RetroArch. Update your TV in Settings, under Updates, then try again." },
+        "origaitv.moonlight": { state: "installed", error: "Couldn't remove it" },
+      },
+    }),
+  );
+  const apps = new SetupApps({ state: dir, source: async () => "index", catalog: async () => GAMES_INDEX, status: statusPath, running: async () => false });
+  const here: Present[] = [MUSIC, { id: "origaitv.steam", name: "Steam", tier: "official" }, { id: "origaitv.moonlight", name: "Moonlight", tier: "official" }];
+  const { apps: games } = await apps.games(here);
+  const line = (id: string) => games.find((one) => one.id === id)!;
+  const steam = line("origaitv.steam");
+  assert.deepEqual([steam.installed, steam.state, steam.error], [true, null, undefined]);
+  assert.equal(line("origaitv.retroarch").state, "failed");
+  assert.match(line("origaitv.retroarch").error ?? "", /^Couldn't install RetroArch\. Update your TV/);
+  assert.equal(line("origaitv.moonlight").error, "Couldn't remove it");
+});
+
 test("a line root left going when it stopped, or going for longer than one install may take, shows as not done", async () => {
   const dir = join(scratch, "cut-short");
   const statusPath = join(dir, "run", "state.json");
