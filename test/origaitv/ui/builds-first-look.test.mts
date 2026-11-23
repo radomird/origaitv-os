@@ -27,9 +27,11 @@ let started = 0;
 const errors: string[] = [];
 
 before(async () => {
+  // The browser first, so its own start doesn't count against the
+  // daemon's two seconds: on a busy machine it alone can take one.
+  browser = await chromium.launch({ executablePath: process.env.ORIGAITV_UI_BROWSER });
   started = Date.now();
   ({ daemon, url, state, builds } = await startBox(0, undefined, { features: PHASE_1 }));
-  browser = await chromium.launch({ executablePath: process.env.ORIGAITV_UI_BROWSER });
 });
 
 after(async () => {

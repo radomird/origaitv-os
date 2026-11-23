@@ -368,7 +368,8 @@ test("setup run again with a PIN set: a key typed on the TV asks for the PIN and
     await page.waitForSelector(".pin-pad", { timeout: 5000 });
     assert.equal(await page.locator(".key-field").inputValue(), `sk-ant-${"e".repeat(40)}`, "the key waits in its field while the PIN is asked for");
     await page.keyboard.type("2468");
-    await page.waitForFunction(() => document.querySelector(".setup-headline")?.getAttribute("aria-label") === "All set");
+    // The key is saved, so setup moves on by itself.
+    await page.waitForFunction(() => document.querySelector(".bar .bar-step")?.textContent === "7 of 12 · who's watching");
     assert.deepEqual((await (await fetch(`${url}/api/ai`)).json()).key, { set: true, provider: "claude" });
     assert.equal(await page.locator(".toast.fail").count(), 0);
   } finally {
@@ -421,7 +422,8 @@ test("a PIN the TV stopped honouring is asked for again at the key, which stays 
     assert.equal(await page.locator(".key-field").inputValue(), key);
     assert.equal((await (await fetch(`${url}/api/ai`)).json()).key.set, false);
     await page.keyboard.type("2468");
-    await page.waitForFunction(() => document.querySelector(".setup-headline")?.getAttribute("aria-label") === "All set");
+    // The key is saved, so setup moves on by itself.
+    await page.waitForFunction(() => document.querySelector(".bar .bar-step")?.textContent === "7 of 12 · who's watching");
     assert.deepEqual((await (await fetch(`${url}/api/ai`)).json()).key, { set: true, provider: "claude" });
     assert.equal(await page.locator(".toast.fail").count(), 0);
   } finally {

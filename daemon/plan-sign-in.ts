@@ -26,6 +26,9 @@ export interface PlanSignInOptions {
   state: string; // the daemon's own: plan-sign-in.json
   drop: string; // where root takes asks from: <state>/build-drop
   run: string; // /run/origaitv-build: root's answer and the sign-in's status
+  // Told once, as the sign-in turns out to be done, so setup can move on
+  // whoever asked how it stands: the TV's page or a phone.
+  signedIn?: (provider: Provider) => Promise<void>;
 }
 
 // What setup knows of the plan's sign-in: which provider was asked for, and
@@ -117,6 +120,7 @@ export class PlanSignIn {
         // Signed in is connected: its CLI is there for the sign-in, and
         // this makes sure it stays.
         await this.drop("fetch-cli", { provider: kept.provider });
+        await this.o.signedIn?.(kept.provider).catch(() => {});
         return { provider: kept.provider, signedIn: true };
       }
       return {

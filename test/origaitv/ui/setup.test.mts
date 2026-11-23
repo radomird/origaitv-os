@@ -601,18 +601,18 @@ test("S5.5 picking Claude shows Anthropic's terms for the way in picked, nothing
   assert.match(await phone.locator(".limits").innerText(), /^Spending limits\n*\$5 an app, \$20 a month$/);
   await phone.locator("#api-key").fill(`sk-ant-${"k".repeat(40)}`);
   await phone.locator('[data-action="save-key"]').tap();
-  await page.waitForSelector('[data-action="continue"]', { timeout: 10_000 });
-  assert.match(await textOf(page, ".ready-list"), /\[x\] terms accepted · [\s\S]* on iphone[\s\S]*\[x\] key saved[\s\S]*setting up claude…/);
+  // The key is saved and its terms accepted, so setup moves on by itself.
+  await page.waitForSelector(".people", { timeout: 10_000 });
+  const kept = await (await fetch(`${url}/api/ai`)).json();
+  assert.deepEqual([kept.key, kept.accepted.by.phone], [{ set: true, provider: "claude" }, "iPhone"]);
+  assert.match(await textOf(page, ".bar"), /setting up claude…/);
   await phone.waitForFunction(() => !document.getElementById("tv-ask"), null, { timeout: 30_000 });
   assert.equal(await phone.locator("#api-key").count(), 0);
   await phone.close();
 
   // The CLI's first run, as the screen daemon tells it.
   await post("/api/ai/cli", { state: "ready", version: "2.1.30 (Claude Code)" });
-  await page.waitForFunction(() => /claude is ready$/i.test(document.querySelector(".ready-list")?.textContent ?? ""), null, { timeout: 5000 });
-  await page.keyboard.press("Enter");
-  await page.waitForSelector(".people");
-  assert.match(await textOf(page, ".bar"), /claude is ready/, "the AI's state stays in the bar");
+  await page.waitForFunction(() => /claude is ready/i.test(document.querySelector(".bar")?.textContent ?? ""), null, { timeout: 5000 });
   await page.close();
 });
 
