@@ -179,8 +179,11 @@ const ctx: Ctx = {
     sounds.play(direction);
   },
   back() {
-    if (view?.stay?.()) return;
-    if (view?.back?.()) return;
+    // A screen that's still on its way: Back waits for it, so it never
+    // counts from a step that isn't drawn yet.
+    if (!view) return;
+    if (view.stay?.()) return;
+    if (view.back?.()) return;
     const [step, sub] = route.split("/");
     if (sub) {
       show(step, "back");
