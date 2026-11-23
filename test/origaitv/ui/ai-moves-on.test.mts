@@ -175,3 +175,28 @@ test("T30.6 a sign-in finished in Settings, or after setup's AI step, doesn't mo
   assert.equal((await (await fetch(`${url}/api/ai/sign-in`)).json()).signIn.signedIn, true);
   assert.equal((await (await fetch(`${url}/api/setup`)).json()).setup.step, "goal");
 });
+
+test("T30.6 a key saved on the phone moves setup on to Who's watching by itself, and Back stops at the AI step", async () => {
+  atAi({ provider: "claude", path: "key" });
+  const page = await tv();
+  try {
+    await page.waitForSelector(".terms-list");
+    const phone = await paired();
+    assert.equal((await phoneState(phone)).ai.ask, "terms");
+    assert.equal((await phone.fetch("/api/phone/terms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: "claude", path: "key" }) })).status, 200);
+    await until(async () => (await phoneState(phone)).ai?.ask === "key", "the phone asks for the key");
+    assert.equal((await phone.fetch("/api/phone/key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: `sk-ant-${"k".repeat(40)}` }) })).status, 200);
+    // On with no press on the TV.
+    await page.waitForFunction(() => document.querySelector(".bar .bar-step")?.textContent === "7 of 12 · who's watching");
+    assert.equal((await phoneState(phone)).ai, null, "nothing more to ask");
+    // Back shows the AI step as done, with Continue, and stays.
+    await page.waitForSelector('[data-action="done"].focused');
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelector(".bar .bar-step")?.textContent === "6 of 12 · AI");
+    await page.waitForSelector('[data-action="continue"].focused');
+    await page.waitForTimeout(2000);
+    assert.equal(await bar(page), "6 of 12 · AI");
+  } finally {
+    await page.close();
+  }
+});

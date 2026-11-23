@@ -1364,6 +1364,20 @@ export class Daemon {
     this.broadcast("setup", moved);
   }
 
+  // A key saved at setup's AI step, for the AI picked, with its terms
+  // accepted: setup moves on by itself, as it does once a plan signs in.
+  private async keySaved(provider: unknown): Promise<void> {
+    const setup = await this.setupState.read();
+    if (setup.done || setup.step !== "ai") return;
+    const ai = await this.ai.read();
+    const key = this.key.status();
+    if (!key.set || ai.provider !== provider || key.provider !== provider || ai.path !== "key" || !ai.accepted) return;
+    const moved = (await this.setupState.finish("ai")).state;
+    if (!moved) return;
+    this.log(`setup: ${OFFERS[provider as Provider].name}'s key is saved, so the AI step is finished, on to ${moved.step}`);
+    this.broadcast("setup", moved);
+  }
+
   // At setup's AI step, a plan whose terms were just accepted starts its
   // sign-in right away, so the phone that accepted them shows it next.
   private async startPlanSignIn(ai: { provider: Provider | null; path: string | null; accepted: unknown }): Promise<void> {
@@ -2146,6 +2160,7 @@ export class Daemon {
       this.log(`a key for ${ai.provider} is kept, root's alone, from ${phone.name}`);
       this.broadcast("key", { set: true, provider: ai.provider });
       void this.fetchAiCli("a key was kept");
+      await this.keySaved(ai.provider).catch((error) => this.log(`couldn't move setup on: ${(error as Error).message}`));
       this.json(response, 200, { ok: true, provider: ai.provider });
       return;
     }
@@ -3355,6 +3370,7 @@ export class Daemon {
         void this.fetchAiCli("a key was kept");
       }
       this.broadcast("key", { set, provider: this.key.status().provider });
+      if (set) await this.keySaved(provider).catch((error) => this.log(`couldn't move setup on: ${(error as Error).message}`));
       this.json(response, 200, { ok: true, ...(await this.keyState()) });
       return;
     }
