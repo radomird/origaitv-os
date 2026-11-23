@@ -72,8 +72,10 @@ export function installLine(apps: Installs, names: Record<string, string>): stri
   const name = (id: string) => names[id] ?? id.replace(/^origaitv\./, "");
   const going = Object.keys(apps).filter((id) => apps[id].state === "queued" || apps[id].state === "installing");
   const failed = Object.keys(apps).filter((id) => apps[id].state === "failed");
-  if (going.length) return `Installing ${going.map(name).join(", ")}`;
-  if (failed.length) return `Couldn't install ${failed.map(name).join(", ")}`;
+  // One line in the bar, however many: an app by its name, or how many.
+  const which = (ids: string[]) => (ids.length === 1 ? name(ids[0]) : `${ids.length} apps`);
+  if (going.length) return `Installing ${which(going)}`;
+  if (failed.length) return `Couldn't install ${which(failed)}`;
   return null;
 }
 

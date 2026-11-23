@@ -228,9 +228,11 @@ export async function person(ctx: Ctx, id: string): Promise<View> {
 
   const add = h("button", { class: "button primary", "data-focus": true, "data-action": "save", onclick: () => void save() }, fresh ? "Add" : "Save");
   const off = !fresh && found && home.viewers.length > 1 ? h("button", { class: "button", "data-focus": true, "data-action": "remove", onclick: () => void remove() }, `Remove ${found.name}`) : null;
+  // With setup's own switch on, Add and Remove sit beside the form, clear
+  // of the soundtrack's player at the bottom left.
   const el = h(
     "div",
-    { class: "setup-page" },
+    { class: `setup-page${ctx.info.numbers ? " d3 person2" : ""}` },
     h("div", { class: "person-head" }, face, h("div", {}, ...heading("tv setup · who's watching", fresh ? "New profile" : (found?.name ?? ""), ctx.reduced()))),
     h("div", { class: "person-form" }, name, role, colour, lock, h("div", { class: "person-actions" }, add, off)),
   );

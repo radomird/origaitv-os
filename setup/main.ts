@@ -291,9 +291,11 @@ function show(to: string, direction?: "forward" | "back"): void {
 
 // The status bar's right side: what the screen says, and after the AI step,
 // the provider's CLI arriving in the background, as the apps do after theirs.
+// It's one line, so the AI being ready gives way to news of the apps.
 function barInfo(step: string, info: string): string {
-  const cli = step !== "ai" && ctx.ai ? cliLine(ctx.ai) : null;
   const installing = step !== "apps" ? installLine(ctx.installs, ctx.names) : null;
+  const ready = ctx.ai?.cli?.state === "ready";
+  const cli = step !== "ai" && ctx.ai && !(ready && installing) ? cliLine(ctx.ai) : null;
   return [info, cli, installing].filter(Boolean).join(" · ");
 }
 
