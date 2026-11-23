@@ -735,14 +735,15 @@ export function buildChange(ctx: Ctx, id: string): View {
   };
 }
 
-// A build moved on: the page that was in front when the word came, drawn
-// again with the new list, if it's one this file draws. Only if it's still
-// in front once the list is in: a page opened meanwhile, such as edit mode
-// over home, isn't drawn again under the person's hands.
+// A build moved on: the page in front once the new list is in, drawn again
+// with it, if it's one that shows builds (home, Apps or a build's own page).
+// That's the page that was in front when the word came, or one opened while
+// the list was on its way, which was drawn with the old list. Edit mode is
+// never one of them, wherever it was opened, so it isn't drawn again under
+// the person's hands and an app they're carrying stays in hand.
 export function buildsMoved(ctx: Ctx, route: () => string, redraw: () => void): void {
-  const asked = route();
   void loadBuilds(ctx).then(() => {
-    if (route() !== asked) return;
-    if (asked === "home" || asked === "apps" || asked.startsWith("build/")) redraw();
+    const shown = route();
+    if (shown === "home" || shown === "apps" || shown.startsWith("build/")) redraw();
   });
 }
