@@ -249,6 +249,8 @@ const STATIC = ["launcher", "setup"];
 // the captive page loads and never uses: nothing pairs there.
 const CAPTIVE_FILES = ["companion-web/setup.ts", "companion-web/lib.ts", "companion-web/channel.ts", "companion-web/seal.ts", "companion-web/companion.css", "launcher/glyphs.ts"];
 const MAX_BODY = 64 * 1024;
+// A site's icon from the screen daemon: 512 KB, as base64, and its words.
+const ICON_BODY = 720 * 1024;
 // How long a phone's ask for the state waits for something to change.
 const PHONE_WAIT_MS = 25_000;
 
@@ -3698,6 +3700,27 @@ export class Daemon {
     if (method === "GET" && tile) {
       const answer = await this.home.tileAnswer(tile[1], tile[2] as Size, await this.home.viewer(), url.searchParams.has("fresh"));
       this.json(response, 200, { ok: true, tile: answer.tile, ...(answer.waiting ? { waiting: true } : {}) });
+      return;
+    }
+
+    // A web app's site icon, from the screen daemon, once the app's page is
+    // open in the TV's browser: whether it's still wanted, and the icon as
+    // the page gave it, for a site that refuses the daemon's own request.
+    const pageIcon = /^\/api\/apps\/([a-z0-9.-]+)\/site-icon$/.exec(path);
+    if (pageIcon && method === "GET") {
+      this.json(response, 200, { ok: true, wanted: await this.home.siteIconWanted(pageIcon[1]) });
+      return;
+    }
+    if (pageIcon && method === "POST") {
+      // An icon is up to 512 KB, so its body is bigger than most.
+      let body: { type?: unknown; data?: unknown; from?: unknown } = {};
+      try {
+        if (String(request.headers["content-type"] ?? "").startsWith("application/json")) body = JSON.parse((await this.raw(request, ICON_BODY)).toString("utf8")) ?? {};
+      } catch {
+        // Too big, or not JSON: keepSiteIcon says what's missing.
+      }
+      const why = await this.home.keepSiteIcon(pageIcon[1], body);
+      this.json(response, why ? 400 : 200, why ? { ok: false, error: why } : { ok: true });
       return;
     }
 

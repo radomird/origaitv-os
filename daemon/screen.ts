@@ -50,6 +50,7 @@ import { pathToFileURL } from "node:url";
 import type { Readable, Writable } from "node:stream";
 import { validatePackage, type Tier } from "../apps/contract/manifest.ts";
 import { NO_WEBRTC } from "../apps/contract/page.ts";
+import { ICON_WORLD, PAGE_ICON, type PageIcon } from "./page-icon.ts";
 import type { Cli } from "./ai.ts";
 import { AppHost, type PageBroker } from "./apps/loader.ts";
 import { AskWatch } from "./asks.ts";
@@ -210,6 +211,10 @@ export interface Launcher {
   // OrigaiTV's sign-in bar in the overlay, under the service's page (board
   // 15), for the app named, or gone with null.
   signInBar(name: string | null): Promise<void>;
+  // Whether a web app still needs its site's icon, and the icon read from
+  // its page for the daemon to keep (daemon/page-icon.ts).
+  siteIconWanted?(id: string): Promise<boolean>;
+  keepSiteIcon?(id: string, icon: PageIcon): Promise<void>;
   // Tells OrigaiTV's daemon the sign-in screen is up for an app, or gone, so
   // a paired phone offers its fields (S4.9).
   signingIn(app: { id: string; name: string } | null): Promise<void>;
@@ -382,6 +387,10 @@ interface Options {
   now?: () => number;
   log?: (line: string) => void;
   homeRestartMs?: number;
+  // How long after an app's page opens its site's icon is looked for in it,
+  // and how often: a minute, every 2 s.
+  iconWithinMs?: number;
+  iconEveryMs?: number;
   backHoldMs?: number;
   // Whether the TV is on, or null when the box can't tell (tv-power.ts).
   tvPoll?: () => boolean | null;
@@ -506,6 +515,8 @@ export class Screen {
   private stoppingShell = false;
   private chain: Promise<void> = Promise.resolve();
   private homeRestartMs: number;
+  private iconWithinMs: number;
+  private iconEveryMs: number;
   private homeDelay: number;
   private homeTimer: ReturnType<typeof setTimeout> | null = null;
   private lastRefocus = 0;
@@ -541,6 +552,8 @@ export class Screen {
     this.now = options.now ?? Date.now;
     this.log = options.log ?? ((line) => console.log(line));
     this.homeRestartMs = options.homeRestartMs ?? 500;
+    this.iconWithinMs = options.iconWithinMs ?? 60_000;
+    this.iconEveryMs = options.iconEveryMs ?? 2_000;
     this.homeDelay = this.homeRestartMs;
     this.backHoldMs = options.backHoldMs ?? 1000;
     this.tvPoll = options.tvPoll;
@@ -2213,6 +2226,8 @@ export class Screen {
       if (id !== url) entry.ready = this.serviceProfile(entry);
       // The app's hints for the d-pad, next to its ring and Back.
       if (id !== url) void this.navigationHints(id, entry);
+      // Its site's icon, from its page, when the daemon couldn't get it.
+      if (id !== url) void this.siteIcon(id, entry);
       await this.makeRoom(id);
     }).then(() => ({ ok: true }));
   }
@@ -2430,6 +2445,36 @@ export class Screen {
     await cdp.addScriptIn(target, source, REMOTE_WORLD).catch((error: Error) => this.log(`the d-pad's ring and Back aren't in that page: ${error.message}`));
     // Its focus moving: the phone's keyboard may come up for it (ADR-065).
     await cdp.bindIn?.(target, FOCUS_BINDING, REMOTE_WORLD, () => void this.tellContext()).catch((error: Error) => this.log(`that page can't say where its focus is: ${error.message}`));
+  }
+
+  // A web app's site icon, read from its page in this browser once it has
+  // loaded, when the daemon still wants one: some sites refuse the daemon's
+  // own request for it (daemon/page-icon.ts). Once each time OrigaiTV starts,
+  // for each app, and only up to a minute after the page opens.
+  private iconsRead = new Set<string>();
+  private async siteIcon(id: string, entry: Open): Promise<void> {
+    if (this.iconsRead.has(id) || !this.launcher.siteIconWanted || !this.launcher.keepSiteIcon) return;
+    this.iconsRead.add(id);
+    if (!(await this.launcher.siteIconWanted(id).catch(() => false))) return;
+    const until = this.now() + this.iconWithinMs;
+    while (this.now() < until && !this.ending) {
+      const cdp = this.apps.get("web")?.cdp;
+      if (entry.target && cdp?.evaluateInWorld) {
+        const read = (await cdp.evaluateInWorld(entry.target, ICON_WORLD, PAGE_ICON).catch(() => ({ wait: true }))) as PageIcon | { wait: true } | null;
+        if (read === null) {
+          this.log(`${id}'s page names no icon it can read`);
+          return;
+        }
+        if (!("wait" in read)) {
+          await this.launcher
+            .keepSiteIcon(id, read)
+            .then(() => this.log(`${id}'s icon, read from its page`))
+            .catch((error: Error) => this.log(`${id}'s icon from its page wasn't kept: ${error.message}`));
+          return;
+        }
+      }
+      await sleep(this.iconEveryMs);
+    }
   }
 
   // An app's hints for the phone's d-pad on its own pages (ADR-103), in
@@ -3004,6 +3049,22 @@ export const launcher: Launcher = {
     const switches = (await response.json()) as { phonepad?: unknown };
     gameModeRead = { at: Date.now(), on: response.ok && switches.phonepad === true };
     return gameModeRead.on;
+  },
+
+  async siteIconWanted(id) {
+    const response = await fetch(`${HOME_URL}api/apps/${encodeURIComponent(id)}/site-icon`, { signal: AbortSignal.timeout(5000) });
+    const answer = (await response.json()) as { wanted?: unknown };
+    return response.ok && answer.wanted === true;
+  },
+
+  async keepSiteIcon(id, icon) {
+    const response = await fetch(`${HOME_URL}api/apps/${encodeURIComponent(id)}/site-icon`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(icon),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error ?? `answered ${response.status}`);
   },
 
   async signingIn(app) {

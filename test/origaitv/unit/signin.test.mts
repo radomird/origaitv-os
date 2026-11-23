@@ -244,6 +244,52 @@ test("a site's icon that didn't come says why in the log, and is asked for again
   }
 });
 
+test("T30.10 a site that refuses the daemon gets its icon from its page on the TV, kept only from the app's own site, once", async () => {
+  const { apps, state } = makeBox([
+    {
+      id: "local.region",
+      name: "Region",
+      tier: "local",
+      category: "streaming",
+      edit: (m) => {
+        m.tv.homeUrl = `${base}/region/`;
+        m.tv.origins = [base];
+        m.tv.capabilities = ["launch"];
+        delete m.tv.setup;
+        delete m.tv.icon;
+        delete m.tv.tiles;
+      },
+    },
+  ]);
+  const lines: string[] = [];
+  const changes: string[] = [];
+  const home = new Home({ appsDir: apps, state, userAgent: "OrigaiTV/0.1", harness: HARNESS, iconRetryMs: 60_000, log: (line) => lines.push(line), changed: (event) => changes.push(event) });
+  open = false;
+  try {
+    assert.equal((await home.apps()).find((app) => app.id === "local.region")?.icon, undefined, "the site refused the daemon");
+    assert.equal(await home.siteIconWanted("local.region"), true);
+    const data = PNG.toString("base64");
+    assert.equal(await home.keepSiteIcon("local.region", { type: "image/png", data, from: "https://elsewhere.example/logo.png" }), "an icon comes from the app's own site");
+    assert.equal(await home.keepSiteIcon("local.region", { type: "text/html", data, from: `${base}/logo.png` }), "an icon is a PNG, JPEG, WebP, GIF, AVIF, SVG or ICO image");
+    assert.equal(await home.keepSiteIcon("local.region", { type: "image/png", data: "", from: `${base}/logo.png` }), "an icon is up to 512 KB");
+    assert.equal(await home.keepSiteIcon("local.region", { type: "image/png", data: Buffer.alloc(512 * 1024 + 1).toString("base64"), from: `${base}/logo.png` }), "an icon is up to 512 KB");
+    assert.equal(await home.siteIconWanted("local.region"), true, "nothing kept yet");
+    assert.equal(await home.keepSiteIcon("local.region", { type: "image/png; charset=binary", data, from: `${base}/logo.png` }), null);
+    assert.ok(changes.includes("apps"), "home hears of it");
+    assert.equal((await home.apps()).find((app) => app.id === "local.region")?.icon, "/api/apps/local.region/icon");
+    const kept = await home.icon("local.region");
+    assert.equal(kept?.type, "image/png");
+    assert.ok(readFileSync(kept!.path).equals(PNG));
+    assert.equal(JSON.parse(readFileSync(join(state, "icons", "local.region.json"), "utf8")).by, "page");
+    assert.equal(await home.siteIconWanted("local.region"), false, "kept, so no longer wanted");
+    assert.equal(await home.keepSiteIcon("local.region", { type: "image/png", data, from: `${base}/logo.png` }), "that app doesn't need its site's icon");
+    // Nor for an app that isn't there.
+    assert.equal(await home.siteIconWanted("local.nothing"), false);
+  } finally {
+    home.stop();
+  }
+});
+
 // --- The daemon -------------------------------------------------------------------
 
 let daemon: Daemon;
@@ -328,4 +374,13 @@ test("an app with no icon of its own gets its site's, kept on the box", async ()
   // An app with an icon of its own keeps it.
   const sample = (await (await fetch(`${url}/api/home`)).json()).apps.find((app: { id: string }) => app.id === "origaitv.sample");
   assert.equal((await fetch(`${url}${sample.icon}`)).headers.get("content-type"), "image/svg+xml");
+  // The screen daemon's route for an icon from the app's page: not wanted
+  // once one is kept, or for an app with its own.
+  assert.deepEqual(await (await fetch(`${url}/api/apps/local.notes/site-icon`)).json(), { ok: true, wanted: false });
+  assert.deepEqual(await (await fetch(`${url}/api/apps/origaitv.sample/site-icon`)).json(), { ok: true, wanted: false });
+  const offered = await fetch(`${url}/api/apps/local.notes/site-icon`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "image/png", data: PNG.toString("base64"), from: `${base}/logo.png` }) });
+  assert.equal(offered.status, 400);
+  // And only from this box's own pages.
+  const page = await fetch(`${url}/api/apps/local.notes/site-icon`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://elsewhere.example" }, body: "{}" });
+  assert.equal(page.status, 403);
 });

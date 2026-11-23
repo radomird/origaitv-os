@@ -18,7 +18,7 @@ import type { Ledger, WatchRow } from "./ledger.ts";
 import { legible, modeOf } from "./legible.ts";
 import { boxZone, cities, cityOf, placeSettings, type City } from "./place.ts";
 import { DATA_DIRS, packageIcon } from "./package-icon.ts";
-import { siteIcon } from "./site-icon.ts";
+import { ICON_MAX, ICON_TYPES, siteIcon } from "./site-icon.ts";
 
 // Where an app came from: the signed index, this box's agent, or OrigaiTV
 // itself, for the built-ins in apps/builtin/ (ADR-015, ADR-017).
@@ -854,6 +854,46 @@ export class Home {
     if (found.manifest.tv.runtime === "native") return packageIcon({ ...found.manifest.tv, name: found.manifest.name }, this.dataDirs);
     const site = await readJson<{ type?: string } | null>(join(this.state, "icons", `${id}.json`), null);
     return site?.type ? { path: join(this.state, "icons", id), type: site.type } : null;
+  }
+
+  // Whether a web app still needs its site's icon: one with no icon of its
+  // own, and none kept yet. The screen daemon asks, once the app's page is
+  // open in the TV's browser, and reads the icon there when a site refuses
+  // the daemon's own request for it, as some sites refuse anything that
+  // isn't a browser.
+  async siteIconWanted(id: string): Promise<boolean> {
+    const found = (await this.manifests()).find(({ manifest }) => manifest.id === id);
+    if (!found || found.tier === "built-in" || found.manifest.tv.runtime !== "web" || found.manifest.tv.icon) return false;
+    return !existsSync(join(this.state, "icons", `${id}.json`));
+  }
+
+  // The site's icon as the TV's browser read it from the app's own page:
+  // kept like the one the daemon fetches, and only while it's wanted. Null
+  // when it's kept, or why not. It's only ever drawn, as an image.
+  async keepSiteIcon(id: string, icon: { type?: unknown; data?: unknown; from?: unknown }): Promise<string | null> {
+    if (!(await this.siteIconWanted(id))) return "that app doesn't need its site's icon";
+    const type = typeof icon.type === "string" ? icon.type.split(";")[0].trim().toLowerCase() : "";
+    if (!ICON_TYPES.test(type)) return "an icon is a PNG, JPEG, WebP, GIF, AVIF, SVG or ICO image";
+    let from: URL;
+    try {
+      from = new URL(String(icon.from));
+    } catch {
+      return "an icon comes from an address";
+    }
+    const found = (await this.manifests()).find(({ manifest }) => manifest.id === id);
+    const allowed = found ? allowedOrigins(found.manifest, (await this.appSettings())[id] ?? {}, this.onBox(found)) : new Set<string>();
+    if (!allowed.has(from.origin)) return "an icon comes from the app's own site";
+    const body = typeof icon.data === "string" && /^[A-Za-z0-9+/]+={0,2}$/.test(icon.data) ? Buffer.from(icon.data, "base64") : null;
+    if (!body || body.length === 0 || body.length > ICON_MAX) return `an icon is up to ${ICON_MAX / 1024} KB`;
+    const dir = join(this.state, "icons");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, id), body);
+    await writeJson(join(dir, `${id}.json`), { type, from: from.href, by: "page", at: new Date().toISOString() });
+    clearTimeout(this.iconRetry.get(id));
+    this.iconRetry.delete(id);
+    this.log(`${id}: its site's icon, read from its page on the TV, is its logo now`);
+    this.changed("apps");
+    return null;
   }
 
   // What opening an app means, for the screen daemon: its home address with

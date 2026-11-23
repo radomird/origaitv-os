@@ -11,6 +11,7 @@ import type { Client, Hyprland, Layer, Monitor } from "../../../daemon/hyprland.
 import type { DevTools } from "../../../daemon/cdp.ts";
 import { MUTE, PAUSE, RESUME, UNMUTE } from "../../../daemon/media.ts";
 import { BACK_TAP, FOCUS_BINDING, navigationPage, REMOTE_PAGE, REMOTE_WORLD, SHARED_PAGE, WHEEL_AT } from "../../../daemon/remote-page.ts";
+import { ICON_WORLD, PAGE_ICON, type PageIcon } from "../../../daemon/page-icon.ts";
 import { FIELD } from "../../../daemon/remote-text.ts";
 import type { Cli } from "../../../daemon/ai.ts";
 import type { PageBroker } from "../../../daemon/apps/loader.ts";
@@ -344,6 +345,9 @@ class FakeLauncher implements Launcher {
   async signInBar(name: string | null) {
     this.bars.push(name);
   }
+  // Set by a test that reads a site's icon from a page.
+  siteIconWanted?: (id: string) => Promise<boolean>;
+  keepSiteIcon?: (id: string, icon: PageIcon) => Promise<void>;
   signings: (string | null)[] = [];
   async signingIn(app: { id: string; name: string } | null) {
     this.signings.push(app?.id ?? null);
@@ -524,6 +528,8 @@ async function tv(
     pictures?: Pictures;
     running?: string;
     fitted?: () => boolean;
+    iconWithinMs?: number;
+    iconEveryMs?: number;
   } = {},
 ) {
   const { homeUp = true, ...rest } = options;
@@ -1629,6 +1635,39 @@ test("S2.16 holding Back for a second goes home; a tap stays with the app", asyn
   await sleep(150);
   await t.screen.idle();
   assert.equal(t.screen.front()?.role, "home");
+});
+
+test("T30.10 a web app's site icon is read from its page in its own world once it has loaded, when the daemon still wants one, and only once", async () => {
+  const t = await tv({ iconEveryMs: 10, iconWithinMs: 2000 });
+  const wanted: string[] = [];
+  const kept: [string, PageIcon][] = [];
+  t.launcher.siteIconWanted = async (id: string) => {
+    wanted.push(id);
+    return id === "origaitv.tube";
+  };
+  t.launcher.keepSiteIcon = async (id: string, icon: PageIcon) => void kept.push([id, icon]);
+  const asked: [string, string, string][] = [];
+  let loads = 2;
+  t.launcher.browser.evaluateInWorld = async (targetId, world, expression) => {
+    asked.push([targetId, world, expression]);
+    if (world !== ICON_WORLD) return null;
+    return loads-- > 0 ? { wait: true } : { type: "image/png", data: "iVBORw0KGgo=", from: "https://origaitv.tube.example/icon.png" };
+  };
+  const target = await openApp(t, "origaitv.tube", "0xb");
+  for (let i = 0; i < 100 && !kept.length; i++) await sleep(10);
+  assert.deepEqual(kept, [["origaitv.tube", { type: "image/png", data: "iVBORw0KGgo=", from: "https://origaitv.tube.example/icon.png" }]]);
+  const reads = asked.filter(([, world]) => world === ICON_WORLD);
+  assert.equal(reads.length, 3, "asked again while the page was loading");
+  assert.ok(reads.every(([id, , expression]) => id === target && expression === PAGE_ICON), "in the app's own page, in its own world");
+  // An app the daemon doesn't want one for isn't read, and one already read
+  // this time isn't asked about again.
+  await openApp(t, "origaitv.player", "0xc");
+  await t.screen.home();
+  await t.screen.fromHome({ cmd: "open-app", app: "origaitv.tube" });
+  await sleep(50);
+  assert.deepEqual(wanted, ["origaitv.tube", "origaitv.player"]);
+  assert.equal(asked.filter(([, world]) => world === ICON_WORLD).length, 3);
+  assert.equal(kept.length, 1);
 });
 
 test("T8.4 a tap on Back tells the web app's page it was a tap, for one it didn't see; a hold doesn't", async () => {
