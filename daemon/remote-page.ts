@@ -40,6 +40,13 @@
 // gets the same spatial navigation and SHARED_PAGE: the ring without Back,
 // since Back there closes the page.
 //
+// While a dialog is open, or a layer covers the page (a cookie banner with a
+// dark backdrop, say, or a step that asks you to confirm it's you), the
+// arrows keep to what's on top: its buttons and links, and nothing the
+// layer hides. Focus left under it, such as a sign-in's email field that a
+// banner then covered, starts again in the layer. So a person with only the
+// d-pad can always get past it, by pressing one of its buttons.
+//
 // Every frame of the page also says when its focus moves, through
 // FOCUS_BINDING, which the screen daemon gives this world alone. The screen
 // daemon then reads the focused field itself, so the phone's keyboard comes
@@ -99,6 +106,10 @@ const PAGE_SHARE = 0.7;
 // the left, each to within NEAR_PX.
 const SAME_SIZE = 0.9;
 const NEAR_PX = 24;
+
+// A layer over the page, such as a cookie banner's dark backdrop or a
+// sign-in step's dialog, covers at least this share of the screen.
+const LAYER_SHARE = 0.6;
 
 // holdMs: the screen daemon's hold on Back that goes home. back: whether a
 // tap on Back goes back a page.
@@ -556,6 +567,42 @@ export function remotePage(holdMs = 1000, o: { back?: boolean } = {}): string {
     return { left, top, right, bottom };
   };
 
+  // What's on top of the page now: an open dialog, or a layer fixed over
+  // most of the screen, as a banner's backdrop is. Null with neither. A
+  // page whose whole app sits in one fixed box is its own layer, and loses
+  // nothing by it.
+  const MODAL = "dialog[open], [aria-modal='true']";
+  const showing = (el) => el.getClientRects().length > 0 && (!el.checkVisibility || el.checkVisibility({ opacityProperty: true, visibilityProperty: true }));
+  // The element painted on top at a point, or null off the screen.
+  const hit = (x, y) => (x >= 0 && y >= 0 && x < innerWidth && y < innerHeight ? document.elementFromPoint(x, y) : null);
+  const layer = () => {
+    const modals = [...document.querySelectorAll(MODAL), ...deep(document, "dialog[open]")].filter(showing);
+    // The last one opened is the one on top, and its middle shows it.
+    for (const modal of modals.reverse()) {
+      const b = modal.getBoundingClientRect();
+      const top = hit((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+      if (top && (top === modal || holds(modal, top))) return { modal, cover: null };
+    }
+    const top = hit(innerWidth / 2, innerHeight / 2);
+    for (let a = top; a && a !== document.body && a !== document.documentElement; a = parentOf(a)) {
+      if (getComputedStyle(a).position !== "fixed") continue;
+      const b = a.getBoundingClientRect();
+      const w = Math.max(0, Math.min(b.right, innerWidth) - Math.max(b.left, 0));
+      const h = Math.max(0, Math.min(b.bottom, innerHeight) - Math.max(b.top, 0));
+      if (w * h >= innerWidth * innerHeight * ${LAYER_SHARE}) return { modal: null, cover: a };
+    }
+    return null;
+  };
+  // Whether a thing is on top with a layer up: inside the dialog, or, over a
+  // cover, what's painted at its middle is it or inside it. One out of sight
+  // can't be checked, so it counts only inside the cover.
+  const onTop = (el, box, up) => {
+    if (up.modal) return holds(up.modal, el);
+    const at = hit((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+    if (!at) return holds(up.cover, el);
+    return at === el || holds(el, at) || holds(at, el);
+  };
+
   // Everything the d-pad can land on now, each with what of it can be in
   // sight on the way: what can take focus or be pressed, the app's own
   // items, and the outermost part of each card that shows a pointer.
@@ -580,11 +627,12 @@ export function remotePage(holdMs = 1000, o: { back?: boolean } = {}): string {
     const root = document.scrollingElement || document.documentElement;
     const page = { x: canScroll(root, 1, 0) || canScroll(root, -1, 0), y: canScroll(root, 0, 1) || canScroll(root, 0, -1) };
     const seen = [];
+    const up = layer();
     for (const el of found) {
       if (el.matches(":disabled") || el.closest("[inert]")) continue;
       if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
       const box = sight(el, axis, page);
-      if (box) seen.push({ el, box });
+      if (box && (!up || onTop(el, box, up))) seen.push({ el, box });
     }
     const set = new Set(seen.map((s) => s.el));
     const wraps = new Set();
@@ -768,10 +816,21 @@ export function remotePage(holdMs = 1000, o: { back?: boolean } = {}): string {
     setTimeout(look, ${LOOK_MS});
   };
 
+  // What has focus, unless a layer has come over it: then nothing, so the
+  // press lands on the biggest thing in the layer.
+  const startFrom = () => {
+    const now = deepest();
+    if (!now || now === document.body || now === document.documentElement) return null;
+    const up = layer();
+    if (!up) return now;
+    const b = onScreen(now);
+    const box = { left: Math.max(b.left, 0), top: Math.max(b.top, 0), right: Math.min(b.right, innerWidth), bottom: Math.min(b.bottom, innerHeight) };
+    return onTop(now, box, up) ? now : null;
+  };
+
   const move = (key) => {
     waiting = null;
-    const now = deepest();
-    const from = now && now !== document.body && now !== document.documentElement ? now : null;
+    const from = startFrom();
     const h = hints();
     // Along a row that's scrolled out of sight, the row comes back first.
     if (from) {

@@ -213,6 +213,38 @@ test("T30.11 during a sign-in the keyboard has I'm signed in, which asks the TV 
   await hand.close();
 });
 
+test("T30.11 during a sign-in the keyboard has the arrows and OK too, and the phone's keyboard stays down once the TV's focus leaves the field", async () => {
+  const b = await box(true);
+  const post = (path: string, body: object) => fetch(`${b.url}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  await post("/api/sign-in-screen", { app: "origaitv.tube", name: "Tube" });
+  await context(b, { front: "app", playing: false, appField: { kind: "email", label: "", app: "origaitv.tube" } });
+  const hand = await phone(b, "#tv-text");
+  await until(() => hand.evaluate(() => document.activeElement?.id === "tv-text"), 3000, "the field getting the focus, on the TV's field");
+  // The arrows, OK and the keys under them, all on the screen at once.
+  for (const selector of ["#tv-text", '.r2-dpad [data-key="up"]', '.r2-dpad [data-key="down"]', '.r2-dpad [data-key="left"]', '.r2-dpad [data-key="right"]', '.r2-dpad [data-key="enter"]', '[data-key="back"]']) {
+    const found = await hand.locator(selector).boundingBox();
+    assert.ok(found && found.y >= 0 && found.y + found.height <= PHONE.height, `${selector} is on the screen`);
+  }
+  assert.equal(await hand.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight), true, "nothing scrolls");
+  // Down, to a cookie banner's button, say.
+  await hand.locator('.r2-dpad [data-key="down"]').tap();
+  await until(() => JSON.stringify(b.keys.at(-1)) === JSON.stringify({ key: "down" }), 3000, "down reaching the TV");
+  // The TV's focus is on a button now, not a field: the keyboard screen
+  // stays, with nothing asking for the phone's keyboard.
+  await context(b, { front: "app", playing: false });
+  await hand.waitForFunction(() => document.activeElement?.id !== "tv-text" && !!document.querySelector('.r2-dpad [data-key="enter"]'), undefined, { timeout: 3000 });
+  await wait(200);
+  assert.notEqual(await hand.evaluate(() => document.activeElement?.id), "tv-text", "the phone's keyboard isn't asked for");
+  await hand.locator('.r2-dpad [data-key="enter"]').tap();
+  await until(() => JSON.stringify(b.keys.at(-1)) === JSON.stringify({ key: "enter" }), 3000, "OK reaching the TV");
+  // Not signing in: the keyboard for a search has no arrows.
+  await post("/api/sign-in-screen", { app: null });
+  await context(b, { front: "app", playing: false, appField: { kind: "search", label: "search", value: "", app: "origaitv.tube" } });
+  await hand.waitForSelector(".r2-where >> text=Tube · search", { timeout: 3000 });
+  assert.equal(await hand.locator(".r2-dpad").count(), 0, "no arrows on a search's keyboard");
+  await hand.close();
+});
+
 test("T8.3 the surface: a swipe moves the focus, a tap is OK, and a hold opens details on an app's tile and gives the pointer everywhere else, which moves and clicks", async () => {
   const b = await box(true);
   const hand = await phone(b);

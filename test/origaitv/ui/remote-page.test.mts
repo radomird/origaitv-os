@@ -529,6 +529,44 @@ test("T21.1 the d-pad keeps to a page's own scroll area: down its rows as they l
   await cdp.close(page.target);
 });
 
+test("T30.11 a cookie banner's wall over a sign-in: the d-pad starts in the banner, keeps to it, and OK on Reject all lets the form back", async () => {
+  const page = await app("consent.html");
+  await page.until((s) => s.focused === "email", "the email field has the focus, under the wall");
+  await page.press("ArrowDown");
+  const first = await page.until((s) => ["choices", "reject", "accept"].includes(s.focused) && ringAround(s), "the first press lands in the banner, with the ring, not on Continue under the wall");
+  // Along the banner and back, never up into the form under the wall.
+  const seen = new Set([first.focused]);
+  for (const key of ["ArrowLeft", "ArrowLeft", "ArrowRight", "ArrowRight", "ArrowUp"]) {
+    await page.press(key);
+    seen.add((await page.state()).focused);
+  }
+  for (const id of seen) assert.ok(["choices", "reject", "accept"].includes(id), `the arrows kept to the banner: ${[...seen].join(", ")}`);
+  // To Reject all, from wherever the arrows are.
+  for (let tries = 0; tries < 4 && (await page.state()).focused !== "reject"; tries++) {
+    const at = (await page.state()).focused;
+    await page.press(at === "accept" ? "ArrowLeft" : "ArrowRight");
+  }
+  await page.until((s) => s.focused === "reject", "Reject all, reached with the arrows");
+  await page.press("Enter");
+  await page.until((s) => s.title === "rejected", "OK presses Reject all, and the banner goes");
+  await page.press("ArrowUp");
+  await page.until((s) => ["email", "continue", "help"].includes(s.focused), "then the arrows reach the form");
+  await cdp.close(page.target);
+});
+
+test("T30.11 a sign-in step in a modal dialog: the d-pad keeps to the dialog, and OK presses a choice that only shows a pointer", async () => {
+  const page = await app("confirm.html");
+  await page.press("ArrowDown");
+  await page.until((s) => s.focused === "send" && ringAround(s), "the first press lands on the dialog's button, not the page's links");
+  await page.press("ArrowUp");
+  assert.equal((await page.state()).focused, "send", "up from the dialog's first choice stays in the dialog, off the page's links");
+  await page.press("ArrowDown");
+  await page.until((s) => s.focused === "password" && ringAround(s), "down reaches the choice that only shows a pointer");
+  await page.press("Enter");
+  await page.until((s) => s.title === "password", "OK presses it");
+  await cdp.close(page.target);
+});
+
 test("a shared link's page gets the ring, and Back is left to the screen daemon, which closes it (ADR-050, Q164)", async () => {
   const page = await app("desktop.html", SHARED_PAGE);
   await page.press("ArrowDown");

@@ -745,11 +745,13 @@ export class Remote2 {
     return ok;
   }
 
-  private dpad(): HTMLElement {
-    const arrow = (name: "up" | "down" | "left" | "right") => this.iconButton(name, "", { class: `r2-arrow r2-${name}`, "aria-label": name.replace(/^./, (first) => first.toUpperCase()), "data-key": name, onclick: () => this.send({ key: name }) }, 36);
+  // The d-pad, or a smaller one under the keyboard's field during a
+  // sign-in.
+  private dpad(small = false): HTMLElement {
+    const arrow = (name: "up" | "down" | "left" | "right") => this.iconButton(name, "", { class: `r2-arrow r2-${name}`, "aria-label": name.replace(/^./, (first) => first.toUpperCase()), "data-key": name, onclick: () => this.send({ key: name }) }, small ? 28 : 36);
     return h(
       "div",
-      { class: "r2-surface r2-dpad", "data-action": "dpad-pad" },
+      { class: small ? "r2-dpad small" : "r2-surface r2-dpad", "data-action": "dpad-pad" },
       arrow("up"),
       arrow("left"),
       this.ok(),
@@ -1036,8 +1038,11 @@ export class Remote2 {
       this.draw(true);
     };
     // The keyboard comes up by itself where the phone's browser lets a page
-    // open it; elsewhere the field is ready for one tap.
-    requestAnimationFrame(() => input.focus());
+    // open it; elsewhere the field is ready for one tap. During a sign-in,
+    // only while the TV's focus is on a field: once the arrows have moved
+    // it to a button, the phone's own keyboard would cover them.
+    const signingIn = state.signIn !== null;
+    if (!signingIn || state.tv.field) requestAnimationFrame(() => input.focus());
     return [
       h(
         "div",
@@ -1048,10 +1053,13 @@ export class Remote2 {
       h("h1", { class: "r2-headline" }, headline),
       h("label", { class: `r2-field-box${kind === "password" ? " secret" : ""}` }, kind === "password" ? icon("lock", 18) : null, input),
       note,
-      h("div", { class: "r2-gap" }),
+      // During a sign-in, the arrows and OK too: a cookie banner, or a step
+      // that asks how to confirm it's you, is passed with a press, not by
+      // typing.
+      signingIn ? this.dpad(true) : h("div", { class: "r2-gap" }),
       // The TV shows only the service's page during a sign-in (ADR-136), so
       // "I'm signed in" is here. The TV moves on by itself once it can tell.
-      ...(state.signIn ? [this.signedInButton(note)] : []),
+      ...(signingIn ? [this.signedInButton(note)] : []),
       this.keys(state, true),
     ];
   }

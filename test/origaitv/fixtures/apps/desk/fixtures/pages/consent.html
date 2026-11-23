@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Consent</title>
+<style>
+  * { outline: none; }
+  body { margin: 0; background: #111; color: #eee; font: 20px sans-serif; }
+  form { display: flex; flex-direction: column; gap: 24px; width: 600px; margin: 160px auto; }
+  input, button { font: inherit; height: 64px; }
+  #wall { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); z-index: 10; }
+  #banner { position: fixed; left: 0; right: 0; bottom: 0; z-index: 11; display: flex; gap: 24px; align-items: center; padding: 48px; background: #222; }
+  #banner p { flex: 1; margin: 0; }
+  #banner button { padding: 0 32px; }
+</style>
+</head>
+<body>
+<!--
+  A sign-in form the way many sites draw it, with a cookie banner over it:
+  a dark wall across the whole page, so nothing under it can be clicked,
+  and the banner's buttons along the bottom. The email field has the focus
+  when the page opens, under the wall. Reject all and Accept all take the
+  wall and the banner away; More choices doesn't.
+-->
+<form>
+  <input id="email" type="email" aria-label="Email">
+  <button id="continue" type="button">Continue</button>
+  <a id="help" href="next.html?help">Need help?</a>
+</form>
+<div id="wall"></div>
+<div id="banner">
+  <p>We use cookies.</p>
+  <a id="choices" href="#choices">More choices</a>
+  <button id="reject" type="button">Reject all</button>
+  <button id="accept" type="button">Accept all</button>
+</div>
+<script>
+  document.getElementById("email").focus();
+  const done = (word) => {
+    document.getElementById("wall").remove();
+    document.getElementById("banner").remove();
+    document.title = word;
+  };
+  document.getElementById("reject").addEventListener("click", () => done("rejected"));
+  document.getElementById("accept").addEventListener("click", () => done("accepted"));
+  document.getElementById("continue").addEventListener("click", () => (document.title = "continued"));
+</script>
+</body>
+</html>
