@@ -174,7 +174,7 @@ test("T4.1 the size row in Settings steps through the sizes this TV offers, and 
   try {
     await go(page, "settings/look");
     await rest(page);
-    assert.equal(await value(), "Standard");
+    assert.equal(await value(), "Normal");
     await page.evaluate(() => {
       const el = document.querySelector<HTMLElement>('[data-action="size"]')!;
       (window as unknown as { origaitvLauncher: { focus: { set(el: HTMLElement): void } } }).origaitvLauncher.focus.set(el);
@@ -188,7 +188,7 @@ test("T4.1 the size row in Settings steps through the sizes this TV offers, and 
     await page.keyboard.press("ArrowRight");
     await rest(page);
     assert.equal(((await (await fetch(`${url}/api/display`)).json()) as { size: string }).size, "more", "right at the last size stays there");
-    for (const want of ["Standard", "Larger"]) {
+    for (const want of ["Normal", "Large"]) {
       await page.keyboard.press("ArrowLeft");
       await page.waitForFunction((w) => document.querySelector('[data-action="size"] .button-value')?.textContent?.trim() === w, want);
     }
@@ -217,7 +217,7 @@ test("T4.1 on a 4K TV, Settings puts it on 1080p output and back, and the sizes 
     await page.waitForFunction(() => document.querySelector('[data-action="resolution"] .button-value')?.textContent?.trim() === "1080p");
     const hd = await display();
     assert.deepEqual([hd.output, hd.mode, hd.scale, hd.size, hd.sizes], ["1080p", "1920x1080@60", 1, "standard", ["larger", "standard"]], "1080p output, where more on screen isn't offered");
-    assert.equal(await value("size"), "Standard");
+    assert.equal(await value("size"), "Normal");
     await page.keyboard.press("Enter");
     await page.waitForFunction(() => document.querySelector('[data-action="resolution"] .button-value')?.textContent?.trim() === "4K");
     const uhd = await display();
@@ -290,7 +290,7 @@ test("T4.1 with the sizes switched off, there's no size picker and home is at st
     await go(page, "settings/look");
     await rest(page);
     assert.equal(await page.locator('[data-action="size"]').count(), 0);
-    assert.equal((await page.locator('[data-row="size"] .button-value').textContent())?.trim(), "Standard");
+    assert.equal((await page.locator('[data-row="size"] .button-value').textContent())?.trim(), "Normal");
     assert.equal((await fetch(`${url}/api/display`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ size: "larger" }) })).status, 409);
   } finally {
     await page.close();
