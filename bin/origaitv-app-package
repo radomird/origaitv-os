@@ -66,17 +66,23 @@ flatpak=$(jq -r '.tv.package.flatpak // empty' "$manifest" 2>/dev/null || true)
 [[ -n $pkg || -n $flatpak ]] || fail "it names no package"
 [[ -z $pkg || $pkg =~ ^[a-z0-9][a-z0-9@._+-]*$ ]] || fail "'$pkg' isn't a package name"
 
-# pacman installs only with every repository's package list on the box. A
-# box straight from the ISO has none until its first update, and setup's own
+# pacman installs only with every repository's package list on the box,
+# multilib's among them, where Steam's 32-bit drivers come from. A box
+# straight from the ISO has none until its first update, and setup's own
 # update runs only when there's a newer OrigaiTV or Omarchy, so they're
 # fetched here when any is missing. What it never does is half an update,
-# which can break an Arch box: when installing the program would also
-# upgrade a package the box has, because the lists are newer than the
-# system, it says to update first, and Settings, Updates has that update.
+# which can break an Arch box. So it says to update first, and Settings,
+# Updates has that update, when installing the program would:
+#
+# - upgrade a package the box already has, because the lists are newer
+#   than the system;
+# - or bring a 32-bit library at another version than the 64-bit one the
+#   box has, such as lib32-mesa beside mesa, which Steam's games load
+#   together, and which have to match.
 SYNC=${ORIGAITV_PACMAN_SYNC:-/var/lib/pacman/sync}
 # synced <package>...: the lists, and whether these install on their own.
 synced() {
-  local repo missing=0 each
+  local repo missing=0 each version base installed
   for repo in $(pacman-conf --repo-list 2>/dev/null); do
     [[ -f $SYNC/$repo.db ]] || missing=1
   done
@@ -84,14 +90,37 @@ synced() {
     echo "origaitv-app-package: fetching the package lists, which this box doesn't have yet"
     pacman -Sy --noconfirm >&2 || fail "Couldn't download $name. Check your internet, then try again."
   fi
-  # Everything pacman would install for them, each by its name.
-  while IFS= read -r each; do
+  # Everything pacman would install for them, each by its name and version.
+  while read -r each version; do
     [[ -n $each ]] || continue
     if pacman -Q -- "$each" >/dev/null 2>&1; then
       echo "origaitv-app-package: $each would be upgraded on its own, so nothing is installed" >&2
       fail "Couldn't install $name. Update your TV in Settings, under Updates, then try again."
     fi
-  done < <(pacman -Sp --noconfirm --print-format '%n' -- "$@" 2>/dev/null || true)
+    base=${each#lib32-}
+    [[ $base != "$each" ]] || continue
+    installed=$(pacman -Q -- "$base" 2>/dev/null | cut -d' ' -f2 || true)
+    # The same release of the same source: the version without its build
+    # number, which the two sometimes don't share.
+    if [[ -n $installed && ${installed%-*} != "${version%-*}" ]]; then
+      echo "origaitv-app-package: $each $version wouldn't match $base $installed, so nothing is installed" >&2
+      fail "Couldn't install $name. Update your TV in Settings, under Updates, then try again."
+    fi
+  done < <(pacman -Sp --noconfirm --print-format '%n %v' -- "$@" 2>/dev/null || true)
+}
+
+# The 32-bit graphics drivers omarchy-install-gaming-gpu-lib32 installs for
+# this box's graphics, looked at first, the way it picks them.
+lib32_drivers() {
+  omarchy-hw-x86 || return 0
+  lspci 2>/dev/null | grep -iE "(VGA|Display).*Intel" >/dev/null && echo lib32-vulkan-intel
+  lspci 2>/dev/null | grep -iE "(VGA|Display).*AMD" >/dev/null && echo lib32-vulkan-radeon
+  if omarchy-hw-nvidia-gsp; then
+    echo lib32-nvidia-utils
+  elif omarchy-hw-nvidia-without-gsp; then
+    echo lib32-nvidia-580xx-utils
+  fi
+  return 0
 }
 
 # missing <package>...: the ones pacman doesn't have.
@@ -200,7 +229,12 @@ mapfile -t wanted < <(missing "${packages[@]}")
 if (( ${#wanted[@]} == 0 )); then
   echo "origaitv-app-package: $pkg is installed already"
 else
-  synced "${wanted[@]}"
+  drivers=()
+  if $lib32; then
+    mapfile -t drivers < <(lib32_drivers)
+    (( ${#drivers[@]} == 0 )) || mapfile -t drivers < <(missing "${drivers[@]}")
+  fi
+  synced ${drivers[@]+"${drivers[@]}"} "${wanted[@]}"
   if $lib32; then
     omarchy-install-gaming-gpu-lib32 || fail "Couldn't install this app's graphics drivers"
   fi
