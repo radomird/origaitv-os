@@ -257,7 +257,15 @@ export const OFFICIAL = [
 // queue. With removeFails, a removal leaves the app where it was, as root
 // does when it can't take one off. installFails names apps whose program
 // doesn't install, with why: root takes such an app off again.
-export const APPS_MOVER = { ms: 400, restart: false, removeFails: false, installFails: {} as Record<string, string> };
+// native names the apps that install as a program of their own, with the
+// package and command their manifest says.
+export const APPS_MOVER = {
+  ms: 400,
+  restart: false,
+  removeFails: false,
+  installFails: {} as Record<string, string>,
+  native: {} as Record<string, { package: { pacman: string }; exec: string[] }>,
+};
 function appsMover(state: string, apps: string, status: string, catalog: IndexEntry[]): void {
   const drop = join(state, "apps-drop", "install.json");
   let going = false;
@@ -312,7 +320,15 @@ function appsMover(state: string, apps: string, status: string, catalog: IndexEn
         if (app.category) manifest.tv.category = app.category;
         // A game has nothing to set up and no sign-in of the TV's: a page
         // of its own stands in for it.
-        if (app.category === "games") {
+        if (APPS_MOVER.native[id]) {
+          // A program of its own, as Steam is.
+          manifest.tv.runtime = "native";
+          delete manifest.tv.homeUrl;
+          delete manifest.tv.origins;
+          delete manifest.tv.icon;
+          delete manifest.tv.tiles;
+          Object.assign(manifest.tv, APPS_MOVER.native[id], { setup: [], capabilities: ["launch"] });
+        } else if (app.category === "games") {
           Object.assign(manifest.tv, { homeUrl: "https://game.example/", origins: ["https://game.example"], setup: [], capabilities: ["launch"] });
           delete manifest.tv.tiles;
         }
