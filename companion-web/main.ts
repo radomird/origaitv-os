@@ -386,7 +386,7 @@ function termsPage(ask: Ask): HTMLElement {
     try {
       const done = await withPin("accepting the terms", (grant) => api("POST", "/api/phone/terms", { provider: ask.provider, path: ask.path }, grant));
       if (done === null) return;
-      toast("Accepted. Back to your TV.", true);
+      toast("Accepted", true);
       await refresh(true);
     } catch (error) {
       failed(error);

@@ -68,6 +68,9 @@ let disarm = 0;
 // took it. A look asked for earlier can land later, and it still shows the
 // game as it was, so only a later one says how the removal went.
 const removing = new Map<string, number>();
+// And each game handed over to add, the same way, so one whose install
+// didn't work says why once it's over.
+const adding = new Map<string, number>();
 // Each look at the games is numbered as it's asked for, and one that lands
 // after a later one is dropped.
 let asked = 0;
@@ -159,6 +162,7 @@ export function gamesPanel(ctx: Ctx): HTMLElement[] {
     } else if (!answer.data.ok) failed(answer.data.error ?? words.fail);
     else {
       if (path === "/api/games/remove") removing.set(app.id, asked);
+      else adding.set(app.id, asked);
       ctx.sounds.play("confirm");
       ctx.toast(words.done, "ok");
     }
@@ -241,6 +245,14 @@ export function gamesPanel(ctx: Ctx): HTMLElement[] {
       if (app?.state === "removing") continue;
       removing.delete(id);
       if (app?.installed && app.error) failed(`Couldn't remove ${app.name}. Try again.`);
+    }
+    // An install that's over: on the TV, or not, with why.
+    for (const [id, before] of [...adding]) {
+      if (shown <= before) continue;
+      const app = games?.apps.find((one) => one.id === id);
+      if (app?.state === "queued" || app?.state === "installing") continue;
+      adding.delete(id);
+      if (app && !app.installed) failed(app.error ?? `Couldn't add ${app.name}. Try again.`);
     }
     draw();
   };

@@ -14,7 +14,8 @@
 import { featureOn } from "./features.ts";
 import type { SizeId } from "./looks/looks.ts";
 
-export const SIZE_NAMES: Record<SizeId, string> = { larger: "Larger", standard: "Standard", more: "More on screen" };
+// What each size is called, in Settings and in setup alike.
+export const SIZE_NAMES: Record<SizeId, string> = { larger: "Large", standard: "Normal", more: "More on screen" };
 
 // What GET /api/display answers (daemon/display.ts).
 export interface DisplayState {

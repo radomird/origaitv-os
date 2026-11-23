@@ -91,7 +91,9 @@ install_program() {
 
 # install_app <id>
 install_app() {
-  local id=$1 out why status=0
+  local id=$1 out why status=0 here=0
+  # On the TV already, as an app that's being added again.
+  official "$id" && here=1
   set_state "$id" installing
   out=$(timeout --kill-after=1m "$INSTALL_LIMIT" "$INSTALL" "$id" 2>&1) || status=$?
   if (( status == 0 )); then
@@ -101,6 +103,13 @@ install_app() {
       if ! install_program "$id"; then
         why=$(head -n 1 "$PACKAGE_ERRORS/$id.error" 2>/dev/null | cut -c1-200 || true)
         [[ -n $why ]] || why="Couldn't install it"
+        # Without its program the app opens nothing, so one this install
+        # brought goes again: the TV shows what's really on it, and it can
+        # be added again from Settings. One that was here before stays.
+        if (( ! here )); then
+          timeout --kill-after=1m "$REMOVE_LIMIT" "$REMOVE" "$id" >/dev/null 2>&1 ||
+            echo "origaitv-setup-apps: $id stays without its program" >&2
+        fi
         set_state "$id" failed "$why"
         echo "origaitv-setup-apps: the program $id opens didn't install: $why" >&2
         return

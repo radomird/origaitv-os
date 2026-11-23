@@ -958,23 +958,44 @@ export async function widevineVersion(profile: string): Promise<string | null> {
   return best;
 }
 
+// The Widevine module a Chromium starting on this profile loads, as the
+// path its hint file names, or null with none. Chromium on Linux reads the
+// hint once, as it starts, and loads that module before its sandbox closes.
+// A module it fetches while it runs only gets the hint rewritten: Chromium's
+// own component installer says it "can't be used until Chrome is
+// restarted". So a Chromium that started before its first module came can't
+// play protected video at all until it starts again.
+export const WIDEVINE_HINT = "latest-component-updated-widevine-cdm";
+export async function widevineHint(profile: string): Promise<string | null> {
+  try {
+    const path = (JSON.parse(await readFile(join(profile, "WidevineCdm", WIDEVINE_HINT), "utf8")) as { Path?: unknown }).Path;
+    return typeof path === "string" && path !== "" ? path : null;
+  } catch {
+    return null;
+  }
+}
+
 // Runs in the screen daemon, as the person: tells the daemon which Widevine
 // the services' Chromium has, as it starts and whenever Chromium fetches a
 // new one, which it does in the background a few minutes after its first
-// start.
+// start. And tells the screen daemon itself when the hint changes, so a
+// Chromium that's running without that module can start again
+// (Screen.widevineChanged).
 export class WidevineWatch {
-  private options: { home: string; profile: string; log?: (line: string) => void };
+  private options: { home: string; profile: string; log?: (line: string) => void; hinted?: (hint: string | null) => void };
   private watchers: FSWatcher[] = [];
   private told: string | null | undefined;
+  private hint: string | null | undefined;
   private timer?: ReturnType<typeof setTimeout>;
 
-  constructor(options: { home: string; profile: string; log?: (line: string) => void }) {
+  constructor(options: { home: string; profile: string; log?: (line: string) => void; hinted?: (hint: string | null) => void }) {
     this.options = options;
   }
 
   start(): this {
     this.watchProfile();
     void this.tell();
+    void this.hinted();
     return this;
   }
 
@@ -997,6 +1018,7 @@ export class WidevineWatch {
           this.watchProfile();
         }
         void this.tell();
+        void this.hinted();
       }, 1000);
     };
     for (const dir of [this.options.profile, module]) {
@@ -1010,6 +1032,15 @@ export class WidevineWatch {
         // Not there yet.
       }
     }
+  }
+
+  // The hint, when it's changed since the last look.
+  private async hinted(): Promise<void> {
+    if (!this.options.hinted) return;
+    const hint = await widevineHint(this.options.profile);
+    if (hint === this.hint) return;
+    this.hint = hint;
+    this.options.hinted(hint);
   }
 
   private async tell(): Promise<void> {

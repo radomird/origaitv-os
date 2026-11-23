@@ -520,6 +520,8 @@ async function tv(
     pictures?: Pictures;
     running?: string;
     fitted?: () => boolean;
+    widevine?: () => Promise<string | null>;
+    servicesExitMs?: number;
   } = {},
 ) {
   const { homeUp = true, ...rest } = options;
@@ -1584,6 +1586,144 @@ test("S2.15 up to two apps stay open, and a third closes the oldest", async () =
   await openApp(t, "origaitv.sample", "0xe");
   assert.equal(t.launcher.browser.closed.length, 2);
   assert.equal(t.launcher.browser.closed[1], mytv);
+});
+
+// Chromium on Linux loads its Widevine module in the zygote, before the
+// sandbox closes, and its CDM process is forked from there. Without the
+// zygote, or in one process, that path changes, so the services' Chromium
+// keeps both as they are.
+test("the services' Chromium keeps its zygote, where its Widevine module loads", () => {
+  const args = pageArguments(SERVICES_PROFILE, "https://tv.example/");
+  for (const flag of ["--no-zygote", "--single-process", "--no-sandbox", "--disable-component-update"]) assert.ok(!args.includes(flag), flag);
+});
+
+// Chromium on Linux loads its Widevine module only as it starts, and the
+// services' Chromium fetches its first one a few minutes after its first
+// start: without this, no app played protected video until the TV restarted.
+test("a new Widevine module starts the services' Chromium again once it's not in use, so protected video plays", async () => {
+  let hint: string | null = null;
+  const t = await tv({ widevine: async () => hint, servicesExitMs: 500 });
+  // The services' Chromium ends as SIGTERM ends it: its windows close, then it.
+  const ends = (app: FakeApp, ...windows: string[]) => {
+    app.stop = () => {
+      app.stopped = true;
+      for (const address of windows) if (t.hypr.windows.some((w) => w.address === address)) t.hypr.close(address);
+      setTimeout(() => app.exit(), 5);
+    };
+  };
+  await openApp(t, "origaitv.tube", "0xb");
+  const first = t.launcher.last("web");
+  ends(first, "0xb");
+
+  // The module comes while the app is in front: it stays as it is.
+  hint = "/var/lib/origaitv/chromium/WidevineCdm/4.10.2891.0";
+  t.screen.widevineChanged(hint);
+  await t.screen.idle();
+  assert.equal(first.stopped, false, "not under someone's hands");
+  assert.equal(t.screen.front()?.address, "0xb");
+  assert.ok(t.lines.some((line) => /a new widevine module is in/.test(line)), t.lines.join("\n"));
+
+  // Home: it ends, and the app isn't open any more.
+  await t.screen.home();
+  assert.equal(first.stopped, true);
+  assert.equal(t.screen.front()?.role, "home");
+  assert.deepEqual(await open(t.screen), []);
+  assert.ok(t.lines.some((line) => /closing the services' chromium for its new widevine module \(home is in front\)/.test(line)), t.lines.join("\n"));
+
+  // Opening the app starts a new one, which loads the module.
+  await openApp(t, "origaitv.tube", "0xc");
+  const second = t.launcher.last("web");
+  assert.notEqual(second, first);
+  ends(second, "0xc");
+  // The same hint again changes nothing.
+  t.screen.widevineChanged(hint);
+  await t.screen.home();
+  assert.equal(second.stopped, false);
+
+  // A newer one while nobody's using it, the app paused behind home: at once.
+  hint = "/var/lib/origaitv/chromium/WidevineCdm/4.10.2900.0";
+  t.screen.widevineChanged(hint);
+  await t.screen.idle();
+  assert.equal(second.stopped, true);
+  assert.deepEqual(await open(t.screen), []);
+  assert.equal(t.screen.front()?.role, "home");
+});
+
+// A box online fetches its first module whenever it does, as often as not
+// with the TV off: the apps paused behind home stay until the TV's been off
+// long enough for every app to close.
+test("a new Widevine module waits while the TV is off, so the apps it paused are still there when it's back", async () => {
+  let hint: string | null = null;
+  const t = await tv({ widevine: async () => hint, servicesExitMs: 500, tvOffCloseMs: 60_000 });
+  await openApp(t, "origaitv.tube", "0xb");
+  const browser = t.launcher.last("web");
+  browser.stop = () => {
+    browser.stopped = true;
+    t.hypr.close("0xb");
+    setTimeout(() => browser.exit(), 5);
+  };
+  await t.screen.home();
+  await t.screen.tv(false);
+  hint = "/var/lib/origaitv/chromium/WidevineCdm/4.10.3112.0";
+  t.screen.widevineChanged(hint);
+  await t.screen.idle();
+  // A key while it's off goes home, and that doesn't close it either.
+  await t.screen.home();
+  assert.equal(browser.stopped, false, "not while the TV is off");
+  assert.deepEqual((await open(t.screen)).map((o) => o.id), ["origaitv.tube"]);
+  // Back on: the next time home is pressed, it starts again.
+  await t.screen.tv(true);
+  assert.deepEqual((await open(t.screen)).map((o) => o.id), ["origaitv.tube"]);
+  await t.screen.home();
+  assert.equal(browser.stopped, true);
+  assert.deepEqual(await open(t.screen), []);
+});
+
+test("a new Widevine module waits while a web game runs behind home, which comes back where it was", async () => {
+  let hint: string | null = null;
+  const t = await tv({ widevine: async () => hint, servicesExitMs: 500 });
+  t.launcher.targets.set("someone.cloud", { runtime: "web", url: "https://someone.cloud.example/", category: "games" });
+  assert.deepEqual(await t.screen.fromHome({ cmd: "open-app", app: "someone.cloud" }), { ok: true });
+  await sleep(20);
+  t.hypr.open("0xb", t.launcher.last("web").pid);
+  await t.screen.idle();
+  const browser = t.launcher.last("web");
+  await t.screen.home();
+  hint = "/var/lib/origaitv/chromium/WidevineCdm/4.10.2891.0";
+  t.screen.widevineChanged(hint);
+  await t.screen.idle();
+  await t.screen.home();
+  assert.equal(browser.stopped, false, "the game keeps running");
+  // Opening the game again brings it back where it was.
+  await t.screen.fromHome({ cmd: "open-app", app: "someone.cloud" });
+  await t.screen.idle();
+  assert.equal(t.screen.front()?.address, "0xb");
+  assert.equal(browser.stopped, false);
+  assert.equal(t.launcher.started.filter((s) => s.role === "web").length, 1);
+});
+
+test("with a new Widevine module waiting, opening another app straight from the one in front starts the services' Chromium again first", async () => {
+  let hint: string | null = null;
+  const t = await tv({ widevine: async () => hint, servicesExitMs: 500 });
+  await openApp(t, "origaitv.tube", "0xb");
+  const first = t.launcher.last("web");
+  first.stop = () => {
+    first.stopped = true;
+    t.hypr.close("0xb");
+    setTimeout(() => first.exit(), 5);
+  };
+  hint = "/var/lib/origaitv/chromium/WidevineCdm/4.10.2891.0";
+  t.screen.widevineChanged(hint);
+  await t.screen.idle();
+  assert.equal(first.stopped, false);
+  // The phone opens another app, with no home in between.
+  const radio = await openApp(t, "someone.radio", "0xc");
+  assert.equal(first.stopped, true);
+  const second = t.launcher.last("web");
+  assert.notEqual(second, first);
+  assert.ok(radio);
+  assert.deepEqual((await open(t.screen)).map((o) => o.id), ["someone.radio"]);
+  assert.ok(t.lines.some((line) => /closing the services' chromium for its new widevine module \(someone\.radio is opening\)/.test(line)), t.lines.join("\n"));
 });
 
 test("S2.15 a game keeps running under home, with Quit, and doesn't count as one of the two", async () => {

@@ -23,7 +23,9 @@ import {
   pciNames,
   report,
   smoothPassed,
+  widevineHint,
   widevineVersion,
+  WIDEVINE_HINT,
   WidevineWatch,
   type Readings,
   type SmoothResult,
@@ -322,6 +324,39 @@ test("Widevine: the newest module in the profile, told to the daemon as Chromium
     }
     await until(2);
     assert.deepEqual(told[told.length - 1], { path: "/api/box/widevine", version: "4.10.2891.0" });
+  } finally {
+    watch.stop();
+    server.close();
+  }
+});
+
+test("Widevine: the hint a starting Chromium loads, told to the screen daemon when Chromium rewrites it", async () => {
+  const profile = join(scratch, "chromium-hint");
+  mkdirSync(profile, { recursive: true });
+  assert.equal(await widevineHint(profile), null);
+  const hints: (string | null)[] = [];
+  const server = createServer((_request, response) => response.end("{}"));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const watch = new WidevineWatch({ home: `http://127.0.0.1:${(server.address() as { port: number }).port}/`, profile, hinted: (hint) => hints.push(hint) }).start();
+  try {
+    const until = async (n: number) => {
+      for (let i = 0; i < 100 && hints.length < n; i++) await new Promise((r) => setTimeout(r, 50));
+    };
+    await until(1);
+    assert.deepEqual(hints, [null], "none yet");
+    // Chromium's component installer: the module's folder, then the hint.
+    const module = join(profile, "WidevineCdm", "4.10.2891.0");
+    mkdirSync(module, { recursive: true });
+    writeFileSync(join(module, "manifest.json"), JSON.stringify({ version: "4.10.2891.0" }));
+    writeFileSync(join(profile, "WidevineCdm", WIDEVINE_HINT), JSON.stringify({ Path: module }));
+    await until(2);
+    assert.deepEqual(hints, [null, module]);
+    assert.equal(await widevineHint(profile), module);
+    // A hint that isn't JSON, or names nothing, is none.
+    writeFileSync(join(profile, "WidevineCdm", WIDEVINE_HINT), "{");
+    assert.equal(await widevineHint(profile), null);
+    writeFileSync(join(profile, "WidevineCdm", WIDEVINE_HINT), JSON.stringify({ Path: "" }));
+    assert.equal(await widevineHint(profile), null);
   } finally {
     watch.stop();
     server.close();
