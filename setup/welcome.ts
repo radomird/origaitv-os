@@ -2,9 +2,13 @@
 // the setup hotspot on, it's the hotspot's: the phone joins it, the captive
 // page picks the home Wi-Fi, and the box joins that. Once the box is online,
 // on that Wi-Fi or a cable, it's the code that pairs the phone. A phone that
-// pairs moves setup on. Enter carries on with a keyboard instead: on to
-// getting ready when the box is online, or first to the Wi-Fi it can see,
-// with its password typed on the TV.
+// pairs moves setup on, once the box is online. Enter carries on with a
+// keyboard instead: on to getting ready when the box is online, or first to
+// the Wi-Fi it can see, with its password typed on the TV.
+//
+// A phone that installed the TV from the USB stick pairs by itself once
+// it's back, with the stick's secret: the screen waits for it with no code,
+// and shows the code after a couple of minutes if it doesn't come.
 //
 // With setup's own switch on (D3), it's "hi.", one line and the code, with
 // no "use a keyboard instead": the phone is the way in. Enter still carries
@@ -15,6 +19,10 @@ import { joinFields, networkRow, type Picked } from "../launcher/wifi-parts.ts";
 import { setup, type SetupInfo } from "./api.ts";
 import { heading, hi, prompt } from "./frame.ts";
 import type { Ctx, View } from "./main.ts";
+
+// How long the screen waits for the stick's phone, once the box is online,
+// before it shows a code after all.
+const STICK_WAIT_MS = 2 * 60_000;
 
 // What's going on, for the status bar.
 function info(about: SetupInfo): string {
@@ -56,6 +64,9 @@ export function welcome(ctx: Ctx, phase2 = false): View {
 
   let pairing: { code: string; until: number; url: string | null } | null = null;
   let paired: string | null = null;
+  let finishing = false;
+  // When the box was first seen online with the stick's phone still to pair.
+  let waitingSince = 0;
   let stopped = false;
   let timer = 0;
 
@@ -87,14 +98,31 @@ export function welcome(ctx: Ctx, phase2 = false): View {
     requestAnimationFrame(() => ctx.focus.refresh());
     ctx.status(info(about));
     const { hotspot, network } = about;
-    if (paired) {
+    if (paired && network.online) {
       line.textContent = `${paired} is paired`;
+      showQr(null);
+      if (!finishing) {
+        finishing = true;
+        setTimeout(() => {
+          if (!stopped) void ctx.finish("welcome", { keyboard: false });
+        }, 1500);
+      }
+    } else if (paired && hotspot.joining) {
+      line.replaceChildren("Joining ", asWritten(hotspot.joining), "…");
+      showQr(null);
+    } else if (paired) {
+      // A phone can pair on the TV's own Wi-Fi now (the stick's phone does),
+      // so the TV still needs the home Wi-Fi, picked on that phone.
+      line.textContent = hotspot.error ? `${hotspot.error}. Pick your Wi-Fi again on your phone.` : "Pick your Wi-Fi on your phone";
       showQr(null);
     } else if (hotspot.on && hotspot.ssid) {
       line.textContent = hotspot.error ? `${hotspot.error}. Scan the code to try again.` : "Scan the code with your phone";
       showQr(`/api/hotspot/qr?${encodeURIComponent(hotspot.ssid)}`, "Wi-Fi ", asWritten(hotspot.ssid), ...(hotspot.password ? [" · password ", asWritten(hotspot.password)] : []));
     } else if (hotspot.joining) {
       line.replaceChildren("Joining ", asWritten(hotspot.joining), "…");
+      showQr(null);
+    } else if (network.online && about.stickPhone && (waitingSince ||= Date.now()) > Date.now() - STICK_WAIT_MS) {
+      line.textContent = "Waiting for your phone…";
       showQr(null);
     } else if (network.online) {
       const code = await pairCode();
@@ -137,15 +165,13 @@ export function welcome(ctx: Ctx, phase2 = false): View {
         }
       : undefined,
     heard(event, data) {
-      // A phone paired: it says so, and setup moves on.
+      // A phone paired: it says so, and setup moves on once the box is
+      // online (draw does that).
       const name = event === "phones" ? (data as { paired?: string }).paired : undefined;
       if (!name || paired) return;
       paired = name;
       ctx.sounds.play("confirm");
       void draw();
-      setTimeout(() => {
-        if (!stopped) void ctx.finish("welcome", { keyboard: false });
-      }, 1500);
     },
     stop() {
       stopped = true;
