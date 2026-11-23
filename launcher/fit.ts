@@ -26,6 +26,12 @@ export interface FitParts {
   step(by: number): boolean;
   // The margin shown now.
   margin(): number;
+  // The page's canvas changed, as with another size: the marks move to
+  // where the margin puts them on it.
+  place(canvas: { width: number; height: number }): void;
+  // The TV's margin, as it answers now. Shown only when no step of this
+  // stepper is still being saved, since those are newer.
+  follow(margin: number): void;
 }
 
 export interface FitOptions {
@@ -42,6 +48,7 @@ export interface FitOptions {
 export function fitParts(o: FitOptions): FitParts {
   let shown = o.margin;
   let saved = o.margin;
+  let canvas = o.canvas;
   // One save at a time. Steps taken while one is out are saved after it,
   // the last one only.
   let saving = false;
@@ -56,7 +63,7 @@ export function fitParts(o: FitOptions): FitParts {
   const size = h("button", { class: "button fit-size", "data-focus": true, "data-action": "fit-size", "data-adjust": "fit" }, h("span", {}, "Picture size"), value);
 
   const draw = () => {
-    const at = margins(shown, o.canvas);
+    const at = margins(shown, canvas);
     marks.style.setProperty("--mark-x", `${at.x}px`);
     marks.style.setProperty("--mark-y", `${at.y}px`);
     marks.classList.toggle("none", shown === 0);
@@ -89,6 +96,16 @@ export function fitParts(o: FitOptions): FitParts {
     marks,
     size,
     margin: () => shown,
+    place(next) {
+      if (next.width === canvas.width && next.height === canvas.height) return;
+      canvas = next;
+      draw();
+    },
+    follow(margin) {
+      if (saving || wanted !== null || margin === shown) return;
+      shown = saved = margin;
+      draw();
+    },
     step(by) {
       const next = steppedMargin(shown, by);
       if (next === null) return false;

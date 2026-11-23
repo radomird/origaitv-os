@@ -1253,6 +1253,10 @@ export class Daemon {
       ...(askbuilds ? { ask: viewer.role === "adult" ? await askView(this.askKit()) : null } : {}),
       // The look the TV is in, for the remote to match it (ADR-063, D4).
       look: (await this.features.on("looks")) ? await currentLook({ root: this.options.root, state: this.options.state }) : null,
+      // The Omarchy theme the TV is in: its name, whether it's dark or
+      // light, and the colours GET /api/theme.css has, for a remote that
+      // can't take them as CSS. Null until the TV has a theme.
+      theme: await this.home.themeState(),
       viewer,
       viewers: await this.profiles.list(),
       pin: { set: pin.set, locked: pin.locked },
@@ -4288,11 +4292,16 @@ export class Daemon {
     // and the theme's name.
     if (method === "POST" && path === "/api/theme") {
       const name = url.searchParams.get("name");
-      if (!(await this.home.saveTheme(await this.text(request), name && THEME_NAME.test(name) ? name : null))) {
+      const saved = await this.home.saveTheme(await this.text(request), name && THEME_NAME.test(name) ? name : null);
+      if (!saved) {
         this.json(response, 400, { ok: false, error: "that theme has no colours the TV can use" });
         return;
       }
-      this.broadcast("theme", {});
+      // The TV's pages take the colours again either way. The phones hear
+      // only of a theme that changed, since the hook hands the same one over
+      // each time the TV session starts, and their state has it.
+      if (saved === "changed") this.broadcast("theme", {});
+      else this.toPages("theme", {});
       this.json(response, 200, { ok: true });
       return;
     }

@@ -15,7 +15,7 @@ import { boxHost, ownAddresses } from "../apps/contract/address.ts";
 import { AppError, AppHost, allowedOrigins, type AppHostOptions, type Viewer } from "./apps/loader.ts";
 import { readInstalled } from "./apps/install.ts";
 import type { Ledger, WatchRow } from "./ledger.ts";
-import { legible } from "./legible.ts";
+import { legible, modeOf } from "./legible.ts";
 import { boxZone, cities, cityOf, placeSettings, type City } from "./place.ts";
 import { DATA_DIRS, packageIcon } from "./package-icon.ts";
 import { siteIcon } from "./site-icon.ts";
@@ -229,6 +229,26 @@ export function cleanTheme(css: string): string {
     if (COLOR.test(match[2])) lines.push(`  --${match[1]}: ${match[2]};`);
   }
   return lines.length ? `:root {\n${lines.join("\n")}\n}\n` : "";
+}
+
+// The colours a theme's CSS has, by their names without the two dashes, as
+// cleanTheme() and legible() wrote them: what GET /api/theme.css says, as
+// an object. A name that's there twice has its last value, as in CSS.
+export function themeColors(css: string): Record<string, string> {
+  const colors: Record<string, string> = {};
+  for (const match of css.matchAll(/--([a-z][a-z0-9-]{0,40})\s*:\s*([^;{}]+?)\s*;/g)) {
+    if (COLOR.test(match[2])) colors[match[1]] = match[2];
+  }
+  return colors;
+}
+
+// The theme as a paired phone's state has it: its name as Omarchy has it,
+// or null from a hook that didn't say, whether it's dark or light, and its
+// colours.
+export interface ThemeState {
+  name: string | null;
+  mode: "dark" | "light";
+  colors: Record<string, string>;
 }
 
 export function sizesOf(manifest: Manifest): SizeChoice[] {
@@ -1168,15 +1188,29 @@ export class Home {
     return (await readFile(join(this.state, "theme-name"), "utf8").catch(() => "")).trim() || null;
   }
 
-  async saveTheme(css: string, name?: string | null): Promise<boolean> {
+  // The theme for a paired phone's state, read from the same file
+  // GET /api/theme.css sends, so the two can't say different colours. Null
+  // until the TV has been handed a theme.
+  async themeState(): Promise<ThemeState | null> {
+    const colors = themeColors(await this.theme());
+    if (!Object.keys(colors).length) return null;
+    return { name: await this.themeName(), mode: modeOf(colors.background, colors.foreground), colors };
+  }
+
+  // Keeps a theme's colours and its name. False for one with no colours the
+  // TV can use, and otherwise whether anything changed: Omarchy's hook hands
+  // the same theme over again each time the TV session starts.
+  async saveTheme(css: string, name?: string | null): Promise<false | "same" | "changed"> {
     const clean = cleanTheme(css);
     if (!clean) return false;
-    await mkdir(this.state, { recursive: true });
     // With the colours for text that read in it (ADR-048, S5.8).
-    await writeFile(join(this.state, "theme.css"), legible(clean));
+    const next = legible(clean);
+    if (next === (await this.theme()) && (name || null) === (await this.themeName())) return "same";
+    await mkdir(this.state, { recursive: true });
+    await writeFile(join(this.state, "theme.css"), next);
     if (name) await writeFile(join(this.state, "theme-name"), `${name}\n`);
     else await rm(join(this.state, "theme-name"), { force: true });
-    return true;
+    return "changed";
   }
 
   // --- Installs from the command line -----------------------------------
