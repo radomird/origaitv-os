@@ -16,8 +16,9 @@ import { NEEDS_PIN } from "./api.ts";
 import { heading } from "./frame.ts";
 import type { Ctx, View } from "./main.ts";
 
-// The preview's width, as D3 has it: home at 58 percent.
-const PREVIEW_WIDTH = 1114;
+// The preview's width: home at 52 percent, so the sizes under it keep
+// clear of the status bar.
+const PREVIEW_WIDTH = 1000;
 
 export async function look(ctx: Ctx): Promise<View> {
   const found = await fetch("/api/look")

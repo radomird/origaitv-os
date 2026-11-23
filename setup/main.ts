@@ -20,8 +20,8 @@ import { pad as pinPad, type Pad, type PadOptions } from "../launcher/pages/pin.
 import { Sounds } from "../launcher/sounds.ts";
 import { cliLine } from "./ai.ts";
 import { NEEDS_PIN, setup, type AiInfo, type Installs, type SetupInfo, type Step } from "./api.ts";
-import { installLine } from "./apps.ts";
-import { bar, field } from "./frame.ts";
+import { COULDNT_INSTALL, installLine } from "./apps.ts";
+import { bar, field, heading } from "./frame.ts";
 import { Soundtrack } from "./music.ts";
 import { screenFor } from "./steps.ts";
 
@@ -179,8 +179,11 @@ const ctx: Ctx = {
     sounds.play(direction);
   },
   back() {
-    if (view?.stay?.()) return;
-    if (view?.back?.()) return;
+    // A screen that's still on its way: Back waits for it, so it never
+    // counts from a step that isn't drawn yet.
+    if (!view) return;
+    if (view.stay?.()) return;
+    if (view.back?.()) return;
     const [step, sub] = route.split("/");
     if (sub) {
       show(step, "back");
@@ -280,21 +283,76 @@ function show(to: string, direction?: "forward" | "back"): void {
     // A step that asks the daemon first where it picks up.
     const at = moves;
     view = undefined;
-    void next.then((ready) => {
-      if (moves === at) put(to, ready, direction);
-      else ready.stop?.();
-    });
+    // A screen that couldn't be drawn is tried again, rather than leaving
+    // the last one up with setup already past it. After a few tries it says
+    // so, with Try again, and the TV's log says why.
+    void next.then(
+      (ready) => {
+        if (moves !== at) return ready.stop?.();
+        failing = null;
+        put(to, ready, direction);
+      },
+      (error: unknown) => {
+        if (moves !== at) return;
+        if (failing?.route !== to) failing = { route: to, tries: 0 };
+        failing.tries++;
+        if (failing.tries < TRIES) {
+          setTimeout(() => moves === at && show(to, direction), 1000);
+          return;
+        }
+        failing = null;
+        const why = error instanceof Error ? error.message : String(error);
+        void fetch("/api/setup/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ route: to, tries: TRIES, why }) }).catch(() => {});
+        put(to, couldNot(to, direction), direction);
+      },
+    );
     return;
   }
   put(to, next, direction);
 }
 
+// How many times a screen is tried before setup says it couldn't show it,
+// and the one being tried.
+const TRIES = 3;
+let failing: { route: string; tries: number } | null = null;
+
+// A screen setup couldn't show: one line, and Try again. Back goes to the
+// step before, as from the screen itself.
+function couldNot(to: string, direction?: "forward" | "back"): View {
+  const again = h("button", { class: "button primary", "data-focus": true, "data-action": "try-again", onclick: () => show(to, direction) }, "Try again");
+  const el = h(
+    "div",
+    { class: "setup-page d3", "data-failed": to },
+    ...heading("origaitv setup", "Couldn't show this step", ctx.reduced()),
+    h("p", { class: "setup-line" }, "Try again, or go back a step"),
+    h("div", { class: "setup-actions" }, again),
+  );
+  return { el, first: again };
+}
+
 // The status bar's right side: what the screen says, and after the AI step,
 // the provider's CLI arriving in the background, as the apps do after theirs.
+// It's one line, cut short at its end if it must, so what didn't work comes
+// first, then the screen's own word, then what's under way. The AI being
+// ready gives way to any other news, and two things that didn't work are
+// one sentence: "Couldn't set up Claude or 3 apps".
 function barInfo(step: string, info: string): string {
   const cli = step !== "ai" && ctx.ai ? cliLine(ctx.ai) : null;
-  const installing = step !== "apps" ? installLine(ctx.installs, ctx.names) : null;
-  return [info, cli, installing].filter(Boolean).join(" · ");
+  const apps = step !== "apps" ? installLine(ctx.installs, ctx.names) : null;
+  const cliState = ctx.ai?.cli?.state ?? "installing";
+  const appsFailed = Boolean(apps?.startsWith(COULDNT_INSTALL));
+  const news: [number, string][] = [];
+  if (info) news.push([1, info]);
+  if (cli && cliState === "failed" && apps && appsFailed) news.push([0, `${cli} or ${apps.slice(COULDNT_INSTALL.length)}`]);
+  else {
+    if (cli) news.push([cliState === "failed" ? 0 : cliState === "ready" ? 3 : 2, cli]);
+    if (apps) news.push([appsFailed ? 0 : 2, apps]);
+  }
+  const said = news.length > 1 ? news.filter(([rank]) => rank < 3) : news;
+  return said
+    .sort((a, b) => a[0] - b[0])
+    .map(([, text]) => text)
+    .join(" · ");
 }
 
 function put(to: string, next: View, direction?: "forward" | "back"): void {
@@ -386,6 +444,20 @@ async function start(): Promise<void> {
     .catch(() => {});
   ctx.updates = await daemon.updates().catch(() => ctx.updates);
   ctx.ai = await setup.ai().catch(() => undefined);
+  // Past the apps step, the apps' names and how their installs went, so the
+  // bar can name them after the page loads again.
+  if (ctx.info.setup.finished.apps) {
+    void setup.apps().then(
+      (list) => {
+        for (const app of [...(list.starter ?? []), ...list.for, ...(list.games ?? []), ...list.more]) {
+          ctx.names[app.id] = app.name;
+          if (app.state && !ctx.installs[app.id]) ctx.installs[app.id] = { state: app.state, ...(app.error ? { error: app.error } : {}) };
+        }
+        if (view) ctx.status(view.info ?? "");
+      },
+      () => {},
+    );
+  }
   show(ctx.info.setup.step);
   document.body.append(music.el);
   void music.start(ctx.info.setup.muted);

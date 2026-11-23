@@ -1272,6 +1272,30 @@
   font-weight: 700;
 }
 
+/* The bar is one line: the step and the clock keep their room, and what's
+   going on takes what's left, cut short if it must. */
+.bar.counted .bar-left {
+  flex: none;
+  white-space: nowrap;
+}
+
+.bar.counted .bar-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.bar.counted .bar-info {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bar.counted .bar-clock {
+  flex: none;
+}
+
 body.counted .player {
   left: 80px;
   bottom: 144px;
@@ -1415,8 +1439,8 @@ body.counted .player-note {
 
 .setup-look-stage {
   position: relative;
-  width: 1114px;
-  height: 626px;
+  width: 1000px;
+  height: 563px;
   outline: 2px solid var(--selection);
   background: var(--background);
 }
@@ -1812,4 +1836,31 @@ body.counted .player-note {
 
 .setup-page.d3.servers2 .found-list:has(.found-rows:empty) {
   display: none;
+}
+
+/* A profile's page with setup's own switch on: the form on the left, and
+   Add and Remove beside it, so nothing reaches the soundtrack's player. */
+.setup-page.d3.person2 {
+  gap: 40px;
+}
+
+.setup-page.d3.person2 .person-form {
+  display: grid;
+  grid-template-columns: 960px auto;
+  column-gap: 40px;
+  align-items: start;
+  width: auto;
+}
+
+.setup-page.d3.person2 .person-form > :not(.person-actions) {
+  grid-column: 1;
+}
+
+.setup-page.d3.person2 .person-actions {
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  justify-self: start;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 280px;
 }
