@@ -1,13 +1,16 @@
 // Which release a TV runs, for Settings, System (T30.3's unit half): the
-// package's version on stable, or else the release its ISO wrote, and on
-// edge the build's own version beside it, never in its place.
+// package's version on stable, the release its ISO wrote while it runs the
+// build that ISO carried, and once edge has moved it on, the release it was
+// installed from. On edge the build's own version goes beside it, never in
+// its place.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { installedRelease, isRelease, releaseOf } from "../../../daemon/release.ts";
+import { installedRelease, isRelease, running } from "../../../daemon/release.ts";
 import { Daemon } from "../../../daemon/server.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
@@ -26,26 +29,39 @@ test("T30.3 a release's version is plain, a candidate's has its rc, and a build'
   }
 });
 
-test("T30.3 an edge build from the 1.0.0-rc4 ISO runs 1.0.0-rc4", () => {
-  assert.equal(releaseOf("0.2.0.r1061.g91b63a2e0", "1.0.0-rc4"), "1.0.0-rc4");
+const RC4 = { release: "1.0.0-rc4", build: "0.2.0.r1061.g91b63a2e0" };
+
+test("T30.3 an edge box still on the build the 1.0.0-rc4 ISO carried runs 1.0.0-rc4", () => {
+  assert.deepEqual(running("0.2.0.r1061.g91b63a2e0", RC4), { release: "1.0.0-rc4", installedFrom: "1.0.0-rc4" });
 });
 
-test("T30.3 on stable the package's release wins over the ISO's, once it's updated", () => {
-  assert.equal(releaseOf("1.0.0", "1.0.0-rc4"), "1.0.0");
-  assert.equal(releaseOf("1.0.1", ""), "1.0.1");
+test("T30.3 once edge moves it past that build, it runs edge, installed from 1.0.0-rc4", () => {
+  assert.deepEqual(running("0.2.0.r1072.g0c4f00d1e", RC4), { release: null, installedFrom: "1.0.0-rc4" });
+});
+
+test("a box with the one-line file from before still runs its release", () => {
+  assert.deepEqual(running("0.2.0.r1072.g0c4f00d1e", { release: "1.0.0-rc4", build: "" }), { release: "1.0.0-rc4", installedFrom: "1.0.0-rc4" });
+});
+
+test("T30.3 on stable the package's release wins over the ISO's", () => {
+  assert.deepEqual(running("1.0.0", RC4), { release: "1.0.0", installedFrom: "1.0.0-rc4" });
+  assert.deepEqual(running("1.0.1", { release: "", build: "" }), { release: "1.0.1", installedFrom: null });
 });
 
 test("T30.3 a box from an edge ISO, or a checkout, has no release", () => {
-  assert.equal(releaseOf("0.2.0.r1061.g91b63a2e0", ""), null);
-  assert.equal(releaseOf("dev", ""), null);
-  assert.equal(releaseOf("dev", "not a version"), null);
+  const none = { release: null, installedFrom: null };
+  assert.deepEqual(running("0.2.0.r1061.g91b63a2e0", { release: "", build: "" }), none);
+  assert.deepEqual(running("dev", { release: "", build: "" }), none);
+  assert.deepEqual(running("dev", { release: "not a version", build: "dev" }), none);
 });
 
-test("the ISO's file is read by its first line, and a missing one is empty", async () => {
+test("the ISO's file is read a line each, and a missing one is empty", async () => {
   const file = join(scratch, "release");
-  writeFileSync(file, " 1.0.0-rc4 \nanything after\n");
-  assert.equal(await installedRelease(file), "1.0.0-rc4");
-  assert.equal(await installedRelease(join(scratch, "none")), "");
+  writeFileSync(file, " 1.0.0-rc4 \n0.2.0.r1061.g91b63a2e0\n");
+  assert.deepEqual(await installedRelease(file), RC4);
+  writeFileSync(file, "1.0.0-rc4\n");
+  assert.deepEqual(await installedRelease(file), { release: "1.0.0-rc4", build: "" });
+  assert.deepEqual(await installedRelease(join(scratch, "none")), { release: "", build: "" });
 });
 
 // A daemon with the package's settings and the ISO's file where a test says.
@@ -60,19 +76,51 @@ async function box(version: string, channel: string, release: string | null): Pr
   return `http://127.0.0.1:${await daemon.listen()}`;
 }
 
+type State = { version: string; release: string | null; installedFrom: string | null; channel: string };
+
 test("T30.3 the TV's state says the release beside the build, in home, state and health", async () => {
-  const url = await box("0.2.0.r1061.g91b63a2e0", "edge", "1.0.0-rc4");
+  const url = await box("0.2.0.r1061.g91b63a2e0", "edge", "1.0.0-rc4\n0.2.0.r1061.g91b63a2e0\n");
   for (const path of ["/api/home", "/api/state", "/health"]) {
-    const data = (await (await fetch(`${url}${path}`)).json()) as { version: string; release: string | null; channel: string };
+    const data = (await (await fetch(`${url}${path}`)).json()) as State;
     assert.equal(data.version, "0.2.0.r1061.g91b63a2e0", path);
     assert.equal(data.release, "1.0.0-rc4", path);
+    assert.equal(data.installedFrom, "1.0.0-rc4", path);
     assert.equal(data.channel, "edge", path);
   }
 });
 
+test("T30.3 once updated past the ISO's build, the state has no release, and still says where it was installed from", async () => {
+  const url = await box("0.2.0.r1072.g0c4f00d1e", "edge", "1.0.0-rc4\n0.2.0.r1061.g91b63a2e0\n");
+  for (const path of ["/api/home", "/api/state", "/health"]) {
+    const data = (await (await fetch(`${url}${path}`)).json()) as State;
+    assert.equal(data.release, null, path);
+    assert.equal(data.installedFrom, "1.0.0-rc4", path);
+  }
+});
+
 test("T30.3 with no ISO's file, an edge build has no release, and a stable one is its own", async () => {
-  const edge = await box("0.2.0.r1061.g91b63a2e0", "edge", null);
-  assert.equal(((await (await fetch(`${edge}/api/home`)).json()) as { release: string | null }).release, null);
-  const stable = await box("1.0.0", "stable", null);
-  assert.equal(((await (await fetch(`${stable}/api/home`)).json()) as { release: string | null }).release, "1.0.0");
+  const edge = (await (await fetch(`${await box("0.2.0.r1061.g91b63a2e0", "edge", null)}/api/home`)).json()) as State;
+  assert.deepEqual([edge.release, edge.installedFrom], [null, null]);
+  const stable = (await (await fetch(`${await box("1.0.0", "stable", null)}/api/home`)).json()) as State;
+  assert.deepEqual([stable.release, stable.installedFrom], ["1.0.0", null]);
+});
+
+// origaitv version, by the same rule: a line under the package's.
+function version(settings: string, release: string | null): string {
+  const dir = mkdtempSync(join(scratch, "cli-"));
+  writeFileSync(join(dir, "settings"), settings);
+  if (release !== null) writeFileSync(join(dir, "release"), release);
+  const said = spawnSync("bash", [join(ROOT, "bin/origaitv-version")], { encoding: "utf8", env: { ...process.env, PATH: "/usr/bin:/bin", ORIGAITV_PATH: dir, ORIGAITV_RELEASE_FILE: join(dir, "release") } });
+  assert.equal(said.status, 0, said.stderr);
+  return said.stdout.trim();
+}
+
+test("T30.3 origaitv version says the release, then edge, installed from it, and nothing more on stable or with no release", () => {
+  const edge = (build: string) => `ORIGAITV_VERSION=${build}\nORIGAITV_CHANNEL=edge\n`;
+  const rc4 = "1.0.0-rc4\n0.2.0.r1061.g91b63a2e0\n";
+  assert.equal(version(edge("0.2.0.r1061.g91b63a2e0"), rc4), "OrigaiTV 0.2.0.r1061.g91b63a2e0 (edge)\nRelease 1.0.0-rc4");
+  assert.equal(version(edge("0.2.0.r1072.g0c4f00d1e"), rc4), "OrigaiTV 0.2.0.r1072.g0c4f00d1e (edge)\nEdge channel, installed from 1.0.0-rc4");
+  assert.equal(version(edge("0.2.0.r1072.g0c4f00d1e"), "1.0.0-rc4\n"), "OrigaiTV 0.2.0.r1072.g0c4f00d1e (edge)\nRelease 1.0.0-rc4");
+  assert.equal(version(edge("0.2.0.r1061.g91b63a2e0"), null), "OrigaiTV 0.2.0.r1061.g91b63a2e0 (edge)");
+  assert.equal(version("ORIGAITV_VERSION=1.0.0\nORIGAITV_CHANNEL=stable\n", rc4), "OrigaiTV 1.0.0 (stable)");
 });

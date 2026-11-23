@@ -98,7 +98,7 @@ import { discoverRoute, serverPickRoute } from "./routes/discover.ts";
 import { ServerPicks } from "./server-picks.ts";
 import { DisplayRoutes } from "./routes/display.ts";
 import { Inhibitor } from "./inhibit.ts";
-import { installedRelease, releaseOf } from "./release.ts";
+import { installedRelease, running, type Running } from "./release.ts";
 
 export interface DaemonOptions {
   root: string; // OrigaiTV's files: /usr/share/origaitv, or a checkout
@@ -812,10 +812,12 @@ export class Daemon {
     return { set, provider, plans, ai: { provider: ai.provider, path: ai.path, accepted: ai.accepted !== null, ...(ai.models ? { models: ai.models } : {}) } };
   }
 
-  // The release this box runs, for Settings, System (daemon/release.ts): the
-  // package's version on stable, or else the release its ISO was, or null.
-  private async release(info: Record<string, string>): Promise<string | null> {
-    return releaseOf(info.ORIGAITV_VERSION, await installedRelease(this.options.releaseFile));
+  // The release this box runs, and the one it was installed from, for
+  // Settings, System (daemon/release.ts): the package's version on stable,
+  // the ISO's release while the box runs the build it carried, or null once
+  // edge has moved it on.
+  private async release(info: Record<string, string>): Promise<Running> {
+    return running(info.ORIGAITV_VERSION, await installedRelease(this.options.releaseFile));
   }
 
   // The channel this box updates from, as `origaitv channel` says it: the one
@@ -2703,7 +2705,7 @@ export class Daemon {
         ok: true,
         service: "origaitv",
         version: info.ORIGAITV_VERSION,
-        release: await this.release(info),
+        ...(await this.release(info)),
         channel: info.ORIGAITV_CHANNEL,
         // What this process runs, which after an update and before OrigaiTV's
         // services restart is still the package from before (origaitv-restart).
@@ -2736,7 +2738,7 @@ export class Daemon {
 
     if (method === "GET" && path === "/api/state") {
       const [info, setup] = await Promise.all([this.settings(), this.setup()]);
-      this.json(response, 200, { ok: true, version: info.ORIGAITV_VERSION, release: await this.release(info), channel: info.ORIGAITV_CHANNEL, setup });
+      this.json(response, 200, { ok: true, version: info.ORIGAITV_VERSION, ...(await this.release(info)), channel: info.ORIGAITV_CHANNEL, setup });
       return;
     }
 
@@ -2925,7 +2927,7 @@ export class Daemon {
       this.json(response, 200, {
         ok: true,
         version: info.ORIGAITV_VERSION,
-        release: await this.release(info),
+        ...(await this.release(info)),
         channel: info.ORIGAITV_CHANNEL,
         setup,
         viewer,
