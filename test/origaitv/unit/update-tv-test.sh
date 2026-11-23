@@ -384,7 +384,7 @@ grep -q "^runuser -u someone .*omarchy-update.lock" "$calls" || fail "the owner'
 flock -n "$runtime/omarchy-update.lock" true || fail "the lock is let go when the update is done"
 # shellcheck disable=SC2016 # the held lock's command is run later
 flock -n "$runtime/omarchy-update.lock" "$BASH" -c '"$1" >/dev/null 2>&1' _ "$ROOT/bin/origaitv-update-tv" && fail "an update says so when omarchy update is already running"
-[[ $(jq -c '[.state, .detail]' "$progress") == '["failed","nothing changed"]' ]] || fail "an update that couldn't start says nothing changed" "$(cat "$progress")"
+[[ $(jq -c '[.state, .detail, .reason]' "$progress") == '["failed","nothing changed","busy"]' ]] || fail "an update that couldn't start says nothing changed, as another update is running" "$(cat "$progress")"
 grep -q "already running" "$ORIGAITV_UPDATE_STATE/update.log" || fail "the log says why"
 pass "Omarchy's update lock is held for the whole update, so omarchy update can't run beside it"
 
@@ -455,7 +455,7 @@ pass "S2.12 an update with a new kernel restarts the box, and the TV says so"
 tested 0.2.9-1
 printf '%s\n' "origaitv 0.2.1-1 -> 0.3.0-1" >"$SCRATCH/pending-now"
 update && fail "an update that waits says so"
-[[ $(jq -c '[.state, .detail]' "$progress") == '["failed","not tested yet"]' ]] ||
+[[ $(jq -c '[.state, .detail, .reason]' "$progress") == '["failed","not tested yet","untested"]' ]] ||
   fail "an update that waits for the nightly run says so" "$(cat "$progress" "$ORIGAITV_UPDATE_STATE/update.log")"
 [[ -z $(steps) ]] || fail "nothing runs before the update is known to go ahead" "$(steps)"
 [[ ! -s $SCRATCH/sudoers-seen && -z $(ls -A "$sudoers") ]] || fail "H1 and no sudo rule either"
@@ -471,12 +471,24 @@ pass "on edge an update from the TV doesn't wait for the nightly run"
 # A failed update that changed nothing.
 touch "$SCRATCH/fail/omarchy-update-keyring"
 update && fail "a failed update says so"
-[[ $(jq -c '[.state, .detail]' "$progress") == '["failed","nothing changed"]' ]] ||
+[[ $(jq -c '[.state, .detail, .reason, .restart]' "$progress") == '["failed","nothing changed","unchanged",null]' ]] ||
   fail "a failed update that changed nothing says so" "$(cat "$progress")"
 [[ $(steps) == *"omarchy-update-keyring" ]] || fail "a step that fails ends the update there" "$(steps)"
 [[ -z $(ls -A "$sudoers") && -z $(ls -A "$run_dir") ]] || fail "H1 nothing is left behind after a failure"
 rm "$SCRATCH/fail/omarchy-update-keyring"
 pass "an update that fails before anything changed says nothing changed"
+
+# Why it failed, from what pacman said, for the words on screen: no network,
+# a mirror that has moved on, and a full disk.
+for said in "error: failed retrieving file 'core.db' from mirror : Could not resolve host: mirror|offline" \
+  "error: failed retrieving file 'steam-1.0.0.85-1-x86_64.pkg.tar.zst' from mirror : The requested URL returned error: 404|mirror" \
+  "error: could not extract /usr/lib/libfoo.so (No space left on device)|space"; do
+  stub omarchy-update-keyring "echo \"${said%|*}\" >&2; exit 1"
+  update && fail "a failed update says so"
+  [[ $(jq -r .reason "$progress") == "${said#*|}" ]] || fail "an update that failed with \"${said%|*}\" says ${said#*|}" "$(cat "$progress")"
+done
+stub omarchy-update-keyring
+pass "a failed update says why: offline, the mirror moved on, or the disk is full"
 
 # One that fails after the packages went in: a migration that doesn't finish.
 touch "$SCRATCH/fail/omarchy-migrate"
@@ -485,8 +497,18 @@ update && fail "an update whose migrations fail says so"
   fail "an update that fails after the packages says it stopped halfway" "$(cat "$progress")"
 ! grep -q "^the owner's hook$" "$calls" || fail "the owner's hooks don't run after a failed migration" "$(steps)"
 [[ -z $(ls -A "$run_dir") ]] || fail "H1 the folder with the stand-in is gone after a failed migration"
-rm "$SCRATCH/fail/omarchy-migrate"
+[[ $(jq -r .reason "$progress") == "halfway" && $(jq -r .restart "$progress") == "null" ]] || fail "it says why, and the box needs no restart" "$(cat "$progress")"
 pass "an update that fails after the packages went in says it stopped halfway"
+
+# One whose new kernel went in before a later step failed: the running
+# kernel's modules are gone, so the update says the box needs a restart all
+# the same, and leaves the restart to the person, since it failed.
+ORIGAITV_MODULES_DIR="$SCRATCH/new-kernel" update && fail "an update whose migrations fail after a new kernel says so"
+[[ $(jq -c '[.state, .reason, .restart]' "$progress") == '["failed","halfway",true]' ]] ||
+  fail "a failed update after a new kernel says the box needs a restart" "$(cat "$progress")"
+! grep -q "^systemctl reboot" "$calls" || fail "a failed update doesn't restart the box by itself" "$(cat "$calls")"
+rm "$SCRATCH/fail/omarchy-migrate"
+pass "a failed update after a new kernel went in says the box needs a restart"
 
 # The box stays awake for it, as it did under Omarchy's own update.
 grep -qx 'ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle --who=OrigaiTV "--why=installing an update" --mode=block /usr/bin/origaitv-update-tv' "$ROOT/system/origaitv-update-tv.service" ||

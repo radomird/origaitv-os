@@ -117,6 +117,10 @@ export interface UpdateProgress {
   step: "start" | "snapshot" | "packages" | "migrations" | "restart";
   percent: number;
   detail: string;
+  // Why it failed, as a word (bin/origaitv-update-tv), and whether the box
+  // needs a restart all the same, as after a new kernel went in.
+  reason?: string;
+  restart?: boolean;
   at: string;
   from: { origaitv: string; omarchy: string };
   to: { origaitv: string };

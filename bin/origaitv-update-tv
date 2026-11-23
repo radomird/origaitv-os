@@ -74,12 +74,21 @@ from_origaitv=$(pacman -Q origaitv 2>/dev/null | cut -d' ' -f2)
 from_omarchy=$(pacman -Q omarchy 2>/dev/null | cut -d' ' -f2)
 to_origaitv=$(jq -r '.origaitv.available // empty' "$STATE/status.json" 2>/dev/null)
 
+# Why an update that failed didn't go ahead, as a word setup and Settings
+# can say in their own words: offline, busy, untested, space, mirror,
+# halfway or unchanged. And whether the box needs a restart all the same, as
+# after a new kernel went in and a later step failed: the running kernel's
+# modules are gone then.
+reason=""
+restart=false
+
 # progress <state> <step> <percent> [<detail>]
 progress() {
   jq -n --arg state "$1" --arg step "$2" --argjson percent "$3" --arg detail "${4:-}" \
     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg from "$from_origaitv" --arg to "$to_origaitv" \
-    --arg omarchy "$from_omarchy" \
-    '{state: $state, step: $step, percent: $percent, detail: $detail, at: $at, from: {origaitv: $from, omarchy: $omarchy}, to: {origaitv: $to}}' \
+    --arg omarchy "$from_omarchy" --arg reason "${reason:-}" --argjson restart "${restart:-false}" \
+    '{state: $state, step: $step, percent: $percent, detail: $detail, at: $at, from: {origaitv: $from, omarchy: $omarchy}, to: {origaitv: $to}}
+      + (if $reason == "" then {} else {reason: $reason} end) + (if $restart then {restart: true} else {} end)' \
     >"$STATE/progress.json.new"
   chmod 644 "$STATE/progress.json.new"
   mv "$STATE/progress.json.new" "$STATE/progress.json"
@@ -89,6 +98,7 @@ owner=${ORIGAITV_OWNER:-$(awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /nologin|fa
 uid="" home=""
 [[ -n $owner ]] && IFS=: read -r _ _ uid _ _ home _ < <(getent passwd "$owner")
 if [[ -z $owner || -z $uid || -z $home ]]; then
+  reason=unchanged
   progress failed start 0 "there's no user on this box to update as"
   exit 1
 fi
@@ -156,6 +166,7 @@ trap release_lock EXIT
 if [[ $held == "busy" ]]; then
   echo "An Omarchy update is already running." >"$STATE/update.log"
   chmod 644 "$STATE/update.log"
+  reason=busy
   progress failed packages 0 "nothing changed"
   exit 1
 fi
@@ -291,15 +302,31 @@ fi
 "$ORIGAITV_BIN_DIR/origaitv-update-check" >/dev/null 2>&1 || true
 
 if (( status != 0 )); then
+  # Why, from what the update said, for the words on screen.
+  if grep -q "so the update waits" "$log"; then
+    reason=untested
+  elif grep -qiE "could not resolve host|failed to connect|network is unreachable|connection timed out" "$log"; then
+    reason=offline
+  elif grep -qE "need at least [0-9]+ GiB free|No space left on device" "$log"; then
+    reason=space
+  elif grep -qE "failed retrieving file|error: target not found|The requested URL returned error: 404" "$log"; then
+    reason=mirror
+  fi
+  # A kernel that went in before the step that failed leaves the running
+  # one without its modules, so the box needs a restart even so.
+  needs_restart && restart=true
   if [[ $(pacman -Q origaitv 2>/dev/null | cut -d' ' -f2) == "$from_origaitv" && $(pacman -Q omarchy 2>/dev/null | cut -d' ' -f2) == "$from_omarchy" ]]; then
     # origaitv update stops before anything when the nightly run hasn't passed
     # a version it would install (bin/origaitv-tested).
     if grep -q "so the update waits" "$log"; then
       progress failed packages 0 "not tested yet"
     else
+      reason=${reason:-unchanged}
       progress failed packages 0 "nothing changed"
     fi
   else
+    [[ $reason == "untested" ]] && reason=""
+    reason=${reason:-halfway}
     progress failed packages 0 "the update stopped halfway"
   fi
   exit 1
