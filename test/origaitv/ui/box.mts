@@ -84,6 +84,11 @@ function code(id: string): string {
 
 export interface BoxOptions {
   builtins?: boolean;
+  // The package's settings and the release its ISO wrote, as the box has
+  // them in /usr/share/origaitv/settings and /etc/origaitv/release: neither,
+  // so a checkout's "dev" with no release, unless a test gives them.
+  settings?: string;
+  release?: string;
   // The box's network interfaces, as setup sees them: the machine's own
   // unless a test says otherwise.
   interfaces?: () => Record<string, unknown[]>;
@@ -121,6 +126,15 @@ export interface BoxOptions {
 // them before the switches. Phase 2's screens are on by default, and their
 // own tests run them as they ship.
 export const PHASE_1: Partial<FeatureMap> = Object.fromEntries(FEATURE_NAMES.map((name) => [name, false]));
+
+// A file the daemon reads, beside the box's state, when a test gives it:
+// { settingsFile } or { releaseFile }.
+function given(state: string, name: "settings" | "release", text: string | undefined): Record<string, string> {
+  if (text === undefined) return {};
+  const file = join(state, "..", name);
+  writeFileSync(file, text);
+  return { [`${name}File`]: file };
+}
 
 export function machine(name: string): NonNullable<NonNullable<BoxOptions["box"]>["machine"]> {
   return JSON.parse(readFileSync(join(ROOT, "test/origaitv/fixtures/box", `${name}.json`), "utf8"));
@@ -378,6 +392,8 @@ export async function startBox(
     // The channel, as origaitv channel keeps it: none, so stable, until a test
     // puts the box on edge (ADR-053).
     channelFile: join(state, "..", "channel"),
+    ...given(state, "settings", options.settings),
+    ...given(state, "release", options.release),
     setupAppsStatus,
     // The stand-in for root's unit runs for as long as it has something going.
     setupAppsRunning: async () => true,
