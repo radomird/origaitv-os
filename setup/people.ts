@@ -21,8 +21,14 @@ interface Household {
   active: string;
 }
 
+// The household, from the TV. An answer that doesn't come within a few
+// seconds counts as none, so the screen still comes: on the NUC, Who's
+// watching once waited for one that never came, and the AI step stayed on
+// screen with setup already past it.
+const ASK_MS = 5000;
+
 async function household(): Promise<Household> {
-  const reply = await (await fetch("/api/viewers", { cache: "no-store" })).json();
+  const reply = await (await fetch("/api/viewers", { cache: "no-store", signal: AbortSignal.timeout(ASK_MS) })).json();
   return { viewers: reply.viewers ?? [], active: reply.active ?? "" };
 }
 
@@ -81,7 +87,11 @@ function tile(viewer: Viewer, go: () => void): HTMLElement {
 export const people2 = (ctx: Ctx): Promise<View> => people(ctx, true);
 
 export async function people(ctx: Ctx, phase2 = false): Promise<View> {
-  const home = await household().catch(() => ({ viewers: [], active: "" }) as Household);
+  let missed = false;
+  const home = await household().catch(() => {
+    missed = true;
+    return { viewers: [], active: "" } as Household;
+  });
   const row = h("div", { class: "people" });
   const pinValue = h("span", { class: "pin-state" });
   const pinButton = h("button", { class: "pin-switch", "data-focus": true, "data-action": "pin", onclick: () => void togglePin() }, pinValue);
@@ -125,6 +135,9 @@ export async function people(ctx: Ctx, phase2 = false): Promise<View> {
   };
 
   draw(home);
+  // Without the household, the screen came with only Add and Done: the
+  // profiles follow once the TV answers.
+  if (missed) void household().then((now) => row.isConnected && draw(now), () => {});
   const el = phase2
     ? h("div", { class: "setup-page d3 people2" }, ...heading("origaitv people", "Who's watching?", ctx.reduced()), row)
     : h(

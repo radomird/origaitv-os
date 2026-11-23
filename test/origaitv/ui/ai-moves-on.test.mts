@@ -175,3 +175,29 @@ test("T30.6 a sign-in finished in Settings, or after setup's AI step, doesn't mo
   assert.equal((await (await fetch(`${url}/api/ai/sign-in`)).json()).signIn.signedIn, true);
   assert.equal((await (await fetch(`${url}/api/setup`)).json()).setup.step, "goal");
 });
+
+test("T30.6 Who's watching comes once the sign-in is done, even when the TV's first answer about the household doesn't", async () => {
+  // As on the NUC with rc4: the step finished, the next screen's first ask
+  // never came back, and the AI step stayed up showing "signed in".
+  atAi({ provider: "claude", path: "plan" });
+  await daemon.ai.accept("claude", "plan", { phone: "iphone", viewer: "radomir" });
+  const page = await tv();
+  let asked = 0;
+  await page.route("**/api/viewers", async (route) => {
+    if (asked++ === 0) return; // never answered
+    await route.continue();
+  });
+  try {
+    await page.waitForSelector(".ai-options");
+    await until(async () => existsSync(join(state, "build-drop", "sign-in.json")), "the sign-in started");
+    signInSays({ state: "waiting", url: "https://claude.ai/oauth/authorize?code=true&state=s7Q", pastes: true });
+    await page.waitForSelector(".ai-qr:not(.hidden) .qr[src]");
+    signInSays({ state: "done" });
+    await page.waitForFunction(() => document.querySelector(".bar .bar-step")?.textContent === "7 of 12 · who's watching", null, { timeout: 10_000 });
+    // The profiles follow once the TV answers.
+    await page.waitForSelector(".people .person[data-viewer]");
+    assert.ok(asked >= 2);
+  } finally {
+    await page.close();
+  }
+});

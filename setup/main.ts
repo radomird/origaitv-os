@@ -283,10 +283,15 @@ function show(to: string, direction?: "forward" | "back"): void {
     // A step that asks the daemon first where it picks up.
     const at = moves;
     view = undefined;
-    void next.then((ready) => {
-      if (moves === at) put(to, ready, direction);
-      else ready.stop?.();
-    });
+    // A screen that couldn't be drawn is tried again, rather than leaving
+    // the last one up with setup already past it.
+    void next.then(
+      (ready) => {
+        if (moves === at) put(to, ready, direction);
+        else ready.stop?.();
+      },
+      () => setTimeout(() => moves === at && show(to, direction), 1000),
+    );
     return;
   }
   put(to, next, direction);
