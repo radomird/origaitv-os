@@ -1581,6 +1581,15 @@ test("S2.15 up to two apps stay open, and a third closes the oldest", async () =
   assert.equal(t.launcher.browser.closed[1], mytv);
 });
 
+// Chromium on Linux loads its Widevine module in the zygote, before the
+// sandbox closes, and its CDM process is forked from there. Without the
+// zygote, or in one process, that path changes, so the services' Chromium
+// keeps both as they are.
+test("the services' Chromium keeps its zygote, where its Widevine module loads", () => {
+  const args = pageArguments(SERVICES_PROFILE, "https://tv.example/");
+  for (const flag of ["--no-zygote", "--single-process", "--no-sandbox", "--disable-component-update"]) assert.ok(!args.includes(flag), flag);
+});
+
 // Chromium on Linux loads its Widevine module only as it starts, and the
 // services' Chromium fetches its first one a few minutes after its first
 // start: without this, no app played protected video until the TV restarted.
