@@ -44,6 +44,8 @@ export async function look(ctx: Ctx): Promise<View> {
       return;
     }
     current = one.id;
+    // The size shown picked, if the TV isn't at it yet.
+    if (display && display.size !== shownSize() && !(await pickSize(shownSize(), true))) return;
     ctx.sounds.play("confirm");
     // On to Fit to screen, right after the size (ADR-103), then the theme
     // and background, setup's next step. With the sizes off there's no
@@ -85,18 +87,27 @@ export async function look(ctx: Ctx): Promise<View> {
   let display = await loadSizes();
   const sizesBox = h("div", { class: "setup-look-sizes", "data-sizes": "" });
   const offered = () => SETUP_SIZES.filter((one) => display?.sizes.includes(one));
+  // The size shown picked: the TV's own when setup offers it, and normal
+  // when it doesn't, as on a TV set to more on screen in Settings before
+  // setup started again. Moving on from the step sets it.
+  const shownSize = (): SizeId => {
+    if (!display) return "standard";
+    const list = offered();
+    return list.includes(display.size) || !list.includes("standard") ? display.size : "standard";
+  };
   const drawSizes = () => {
     if (!display || offered().length < 2) return sizesBox.replaceChildren();
-    const at = display.size;
+    const at = shownSize();
     sizesBox.replaceChildren(
       h("span", { class: "setup-look-sizes-label" }, "Size"),
       ...offered().map((one) => h("button", { class: `chip${one === at ? " picked" : ""}`, "data-focus": true, "data-action": `size-${one}`, onclick: () => void pickSize(one) }, SETUP_SIZE_NAMES[one])),
     );
   };
-  const pickSize = async (one: SizeId) => {
+  // A size picked, or set as the step moves on. True once the TV has it.
+  const pickSize = async (one: SizeId, moving = false): Promise<boolean> => {
     if (!display || one === display.size) {
-      ctx.sounds.play("confirm");
-      return;
+      if (!moving) ctx.sounds.play("confirm");
+      return true;
     }
     const asked = await ctx
       .guarded("the size", async (grant) => {
@@ -105,21 +116,23 @@ export async function look(ctx: Ctx): Promise<View> {
         return answer;
       })
       .catch((error: Error) => ({ value: { error: error.message } as Awaited<ReturnType<typeof setSize>> }));
-    if (!asked) return;
+    if (!asked) return false;
     const set = asked.value;
     if (!set.state) {
       ctx.sounds.play("failure");
       ctx.toast(set.error ?? `Couldn't use ${SETUP_SIZE_NAMES[one] ?? SIZE_NAMES[one]}`, "fail");
-      return;
+      return false;
     }
     display = set.state;
+    if (moving) return true;
     ctx.sounds.play("confirm");
     drawFrames(display.size);
     drawSizes();
     const again = sizesBox.querySelector<HTMLElement>(`[data-action="size-${one}"]`);
     if (again) ctx.focus.set(again);
+    return true;
   };
-  drawFrames(display?.size ?? "standard");
+  drawFrames(shownSize());
   drawSizes();
 
   const el = h(

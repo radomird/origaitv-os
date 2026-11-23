@@ -257,6 +257,31 @@ test("T4.1 T30.8 setup's look step offers normal and large under the looks, norm
   }
 });
 
+test("T30.8 a TV left at more on screen before setup started again shows normal picked, and moving on sets it", async () => {
+  await put("/api/display", { size: "more" });
+  const at = new Date().toISOString();
+  const finished = Object.fromEntries(["welcome", "ready", "country", "ai", "people", "goal", "apps"].map((step) => [step, at]));
+  writeFileSync(join(state, "setup.json"), JSON.stringify({ done: false, step: "look", finished, goal: "streaming" }));
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  page.on("pageerror", (error) => errors.push(`${page.url()}: ${error.message}`));
+  try {
+    await page.goto(`${url}/`);
+    await page.waitForSelector(".setup-look .look-card.focused");
+    const chips = () => page.$$eval(".setup-look-sizes .chip", (els) => els.map((el) => `${el.textContent?.trim()}${el.classList.contains("picked") ? " *" : ""}`));
+    assert.deepEqual(await chips(), ["Normal *", "Large"]);
+    const previews = () => page.$$eval(".setup-look .look-frame-page", (els) => els.map((el) => new URL((el as HTMLIFrameElement).src).searchParams.get("size")));
+    assert.deepEqual(await previews(), ["standard", "standard", "standard"], "the previews show normal, as picked");
+    // OK on the look moves on, and the TV is at normal from then.
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(".setup-fit");
+    assert.equal(((await (await fetch(`${url}/api/display`)).json()) as { size: string }).size, "standard");
+  } finally {
+    await page.close();
+    writeFileSync(join(state, "setup.json"), JSON.stringify({ done: true }));
+    await put("/api/display", { size: "standard" });
+  }
+});
+
 test("T4.1 with the sizes switched off, there's no size picker and home is at standard, as before", async () => {
   writeFileSync(join(state, "features.json"), JSON.stringify({ looks: true, sizes: false }));
   const page = await tv([3840, 2160]);
