@@ -467,3 +467,80 @@ test("the TV asks the builder once the AI is ready, and the phone sees the app a
     await daemon.close();
   }
 });
+
+test("T29.5 the daemon's first look at the builds is quiet, and a build that moves on is heard at once", async () => {
+  const base = join(scratch, "first-look");
+  mkdirSync(join(base, "root", "setup"), { recursive: true });
+  const builds = join(base, "build");
+  // A build that was running when the daemon stopped, there as it starts.
+  const dir = join(builds, "local.blocks", "1.0.0");
+  mkdirSync(dir, { recursive: true });
+  const status = (state: string) =>
+    writeFileSync(join(dir, "status.json"), JSON.stringify({ build: "b1", id: "local.blocks", version: "1.0.0", sentence: "a game like tetris", phase: "build", state, steps: [], started: "", at: "" }));
+  status("running");
+  // And what was asked, as the daemon keeps it.
+  mkdirSync(join(base, "state"), { recursive: true });
+  writeFileSync(join(base, "state", "builds.json"), JSON.stringify([{ build: "b1", id: "local.blocks", version: "1.0.0", sentence: "a game like tetris", provider: "claude", path: "plan", at: "2026-10-27T18:00:00.000Z" }]));
+  const awake: boolean[] = [];
+  const daemon = new Daemon({
+    root: join(base, "root"),
+    state: join(base, "state"),
+    port: 0,
+    log: () => {},
+    builtins: null,
+    lanPort: 0,
+    lanHost: "127.0.0.1",
+    address: () => "127.0.0.1",
+    keyStatus: join(base, "key.json"),
+    builds,
+    buildRun: join(base, "run"),
+    spend: join(base, "spend.json"),
+    npmWarnings: join(base, "warnings.json"),
+    inhibitor: () => ({ set: (on: boolean) => void awake.push(on) }),
+  });
+  const url = `http://127.0.0.1:${await daemon.listen()}`;
+  const lan = `http://127.0.0.1:${daemon.lanPort}`;
+  // What the TV's pages hear.
+  const events: string[] = [];
+  const stream = await fetch(`${url}/api/events`);
+  const reader = stream.body!.getReader();
+  void (async () => {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      for (const match of new TextDecoder().decode(value).matchAll(/event: ([\w-]+)\n/g)) events.push(match[1]);
+    }
+  })().catch(() => {});
+  try {
+    // The first look was taken as the daemon started: the running build
+    // already keeps the box awake.
+    assert.deepEqual(awake, [true]);
+    const code = (await (await fetch(`${url}/api/phones/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()).pairing.code;
+    const token = await pairPhone(lan, code, "iphone");
+    const state = async (since?: number) => (await token.fetch(`/api/phone/state${since === undefined ? "" : `?since=${since}`}`)).json();
+    const first = await state();
+    assert.deepEqual(first.builds.map((b: { state: string }) => b.state), ["running"]);
+
+    // Past the look two seconds in, which finds what the first one did.
+    await new Promise((done) => setTimeout(done, 2500));
+    const later = await state();
+    assert.equal(later.version, first.version, "the phones' version hasn't moved");
+    assert.deepEqual(events.filter((e) => e === "builds"), [], "no page heard about the builds");
+
+    // The builder moves it on: the next look hears it, and a phone waiting
+    // with its count is woken with it.
+    const asked = Date.now();
+    const waiting = state(later.version);
+    status("approve");
+    const woken = await waiting;
+    assert.ok(Date.now() - asked < 2500, `heard in ${Date.now() - asked} ms`);
+    assert.ok(woken.version > later.version);
+    assert.deepEqual(woken.builds.map((b: { state: string }) => b.state), ["approve"]);
+    assert.deepEqual(events.filter((e) => e === "builds"), ["builds"], "the TV's pages heard it once");
+    assert.deepEqual((await (await fetch(`${url}/api/builds`)).json()).builds.map((b: { state: string }) => b.state), ["approve"]);
+    assert.deepEqual(awake.at(-1), false, "an app waiting for an adult doesn't keep the box awake");
+  } finally {
+    await reader.cancel().catch(() => {});
+    await daemon.close();
+  }
+});

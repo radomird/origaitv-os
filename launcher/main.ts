@@ -1034,7 +1034,7 @@ async function start(): Promise<void> {
       if (history[history.length - 1].startsWith("settings")) gamesMoved(redraw);
     },
     // A build moved on (ADR-043 to ADR-046): its tile, its page and home's bar.
-    builds: () => buildsMoved(ctx, history[history.length - 1], redraw),
+    builds: () => buildsMoved(ctx, () => history[history.length - 1], redraw),
     // Someone else is watching (S4.2): their home, at once. A child's profile
     // closes the apps open behind home that children can't open.
     viewer: () => void switched(),
