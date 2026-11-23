@@ -13,12 +13,16 @@ import { pair, PadRefused, PhoneClient, type Kept, type PhonePad } from "./phone
 
 const USAGE = `Usage: origaitv-phone-call pair <code> [<name>]
        origaitv-phone-call pair-new [<name>]
+       origaitv-phone-call pair-secret [<name>]
        origaitv-phone-call [--errors] <key-file> <METHOD> <path> [<json> | @<file> <content-type>]
        origaitv-phone-call <key-file> pad [<step>...]
 
 pair takes the code on the TV. pair-new has the box show a new code first,
 as Settings → Phones does, with the PIN from ORIGAITV_PIN when one is
-set. Both print the path of a key file. The third form sends one request as
+set. pair-secret pairs with a secret, as a phone that scanned the TV's QR
+code does, or one the USB stick gave it: the secret comes from
+ORIGAITV_PAIR_SECRET, never from the command line. Each prints the path of
+a key file. The third form sends one request as
 that phone and prints the answer. It exits 22 when the box answers 400 or more,
 and prints that answer only with --errors.
 
@@ -135,9 +139,14 @@ async function gameMode(phone: PhoneClient, steps: string[]): Promise<number> {
 }
 
 async function main(args: string[]): Promise<number> {
-  if ((args[0] === "pair" && args.length >= 2 && args.length <= 3) || (args[0] === "pair-new" && args.length <= 2)) {
-    const [code, name] = args[0] === "pair" ? [args[1], args[2]] : [await newCode(), args[1]];
-    const kept = await pair(base, { code }, name ?? "a check");
+  if (args[0] === "pair-secret" && args.length <= 2 && !process.env.ORIGAITV_PAIR_SECRET) {
+    console.error("origaitv-phone-call: pair-secret takes the secret from ORIGAITV_PAIR_SECRET");
+    return 2;
+  }
+  if ((args[0] === "pair" && args.length >= 2 && args.length <= 3) || ((args[0] === "pair-new" || args[0] === "pair-secret") && args.length <= 2)) {
+    const how = args[0] === "pair-secret" ? { secret: process.env.ORIGAITV_PAIR_SECRET! } : { code: args[0] === "pair" ? args[1] : await newCode() };
+    const name = args[0] === "pair" ? args[2] : args[1];
+    const kept = await pair(base, how, name ?? "a check");
     // A folder of its own, which only this user reads, as the key is the phone.
     const path = join(mkdtempSync(join(tmpdir(), "origaitv-phone-")), "key.json");
     writeFileSync(path, JSON.stringify(kept), { mode: 0o600 });

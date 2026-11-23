@@ -10,6 +10,7 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/helpers.sh"
 
 node_test "$ROOT/test/origaitv/unit/phones.test.mts"
+node_test "$ROOT/test/origaitv/unit/stick-pairing.test.mts"
 node_test "$ROOT/test/origaitv/unit/seal.test.mts"
 node_test "$ROOT/test/origaitv/unit/phone-channel.test.mts"
 node_test "$ROOT/test/origaitv/unit/companion-channel.test.mts"

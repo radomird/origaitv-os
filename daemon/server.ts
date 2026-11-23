@@ -609,7 +609,9 @@ export class Daemon {
       now: options.newsNow,
       log: this.log,
     });
-    this.phones = new Phones({ path: join(options.state, "phones.json") });
+    // A phone that set the TV up from the USB stick pairs with the stick's
+    // secret, which first boot puts here (install/tv/state.sh).
+    this.phones = new Phones({ path: join(options.state, "phones.json"), handed: join(options.state, "stick-pairing.json") });
     this.phoneChannel = new PhoneChannel({ phone: (id) => this.phones.key(id) });
     this.hotspot = new Hotspot({ state: options.state, run: options.hotspotRun });
     this.network = new TvNetwork({ hotspot: this.hotspot, run: options.hotspotRun, interfaces: options.interfaces, changed: (state) => this.toPages("network", state) });
@@ -1749,7 +1751,8 @@ export class Daemon {
       // With the announce switch on, the phone learns the box id here, to
       // find its TV by afterwards, and the TV's proof covers it. The state
       // has it too, sealed.
-      const paired = this.phones.pair(asked, (await this.boxId()).boxId);
+      // The USB stick's secret pairs its phone until setup is done.
+      const paired = this.phones.pair(asked, (await this.boxId()).boxId, !(await this.setup()).done);
       if ("error" in paired) {
         this.log("a phone sent a wrong pairing code");
         this.json(response, 403, { ok: false, error: paired.error });
@@ -2796,6 +2799,9 @@ export class Daemon {
       // closed already, as after a join, because root also takes away the
       // network the installer handed over, which is for setup only.
       if (body.done && (!was || this.hotspot.status().on)) this.hotspot.stop();
+      // So does the USB stick's pairing secret, used or not: a setup started
+      // again later shows its code straight away.
+      if (body.done) this.phones.dropStick();
       this.broadcast("setup", setup);
       this.json(response, 200, { ok: true, setup });
       return;
@@ -2820,6 +2826,10 @@ export class Daemon {
         network: network(hotspot, this.options.interfaces?.()),
         hotspot,
         phones: this.phones.list().map((phone) => phone.name),
+        // The phone that set the TV up from the USB stick, still to pair
+        // with the stick's secret: the welcome screen waits for it rather
+        // than show a code.
+        stickPhone: !(await this.setup()).done && this.phones.waitingForStick(),
         pin: this.pin.status().set,
       });
       return;

@@ -77,6 +77,9 @@ export interface SetupInfo {
   network: { online: boolean; via: "ethernet" | "wi-fi" | null; name: string | null };
   hotspot: Hotspot;
   phones: string[];
+  // A phone set the TV up from the USB stick and pairs by itself once it's
+  // back: no code to show for it yet.
+  stickPhone?: boolean;
   // An adult PIN is set, as on a box whose setup was started again.
   pin: boolean;
 }

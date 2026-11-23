@@ -8,9 +8,15 @@
 //
 // A code lasts 10 minutes and pairs one phone. Five wrong tries end it, so
 // the TV has to show a new one.
+//
+// A phone that set the TV up from the USB stick has a secret from the stick
+// too. The stick gives it only to the phone on its own Wi-Fi, and hands it
+// to the installed TV (first boot puts it in the daemon's state). Until
+// setup is done, that secret pairs that one phone the way the QR code's
+// does, with no code on the TV, so nobody scans twice.
 
 import { randomBytes, randomInt } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { b64u, hmac, INFO, phoneKey, same, unb64u, x25519Pair, x25519Shared } from "./phone-channel.ts";
 
@@ -53,6 +59,9 @@ export interface Paired {
 
 export interface PhonesOptions {
   path: string; // <state>/phones.json
+  // <state>/stick-pairing.json: the secret the USB stick handed over, as
+  // {"secret": "<16 bytes, base64url>"}, until a phone pairs with it.
+  handed?: string;
   now?: () => number;
   // Random bytes and a random whole number below `max` of a test's own, in
   // place of the system's.
@@ -64,6 +73,7 @@ const usable = (phone: Stored) => typeof phone?.id === "string" && typeof phone.
 
 export class Phones {
   private path: string;
+  private handedPath: string | undefined;
   private now: () => number;
   private given: ((length: number) => Buffer) | undefined;
   private random: (length: number) => Buffer;
@@ -73,6 +83,7 @@ export class Phones {
 
   constructor(options: PhonesOptions) {
     this.path = options.path;
+    this.handedPath = options.handed;
     this.now = options.now ?? Date.now;
     this.given = options.random;
     this.random = options.random ?? randomBytes;
@@ -102,6 +113,27 @@ export class Phones {
 
   list(): Phone[] {
     return this.read().map(({ key: _key, ...phone }) => ({ ...phone, seenAt: this.seen.get(phone.id) ?? phone.seenAt }));
+  }
+
+  // The secret the USB stick handed over, while no phone has paired with it.
+  private handed(): Buffer | null {
+    if (!this.handedPath) return null;
+    try {
+      return unb64u(JSON.parse(readFileSync(this.handedPath, "utf8"))?.secret, 16);
+    } catch {
+      return null;
+    }
+  }
+
+  // Whether a phone from the USB stick is still to pair. Setup asks, to
+  // wait for it rather than show a code.
+  waitingForStick(): boolean {
+    return this.handed() !== null;
+  }
+
+  // The stick's secret goes: a phone paired with it, or setup is done.
+  dropStick(): void {
+    if (this.handedPath) rmSync(this.handedPath, { force: true });
   }
 
   // A new code for the TV to show, in place of any before it.
@@ -134,27 +166,42 @@ export class Phones {
   // the proof covers it under a label of its own. So a proof made with an
   // id never fits an answer without one, or one with another id, and a
   // proof made without never fits an answer that has one.
-  pair(request: PairRequest | undefined, boxId?: string): Paired | { error: string } {
-    const pending = this.pending;
-    if (!pending || pending.until <= this.now()) return { error: "That code ran out. Pair again from your TV." };
+  //
+  // `stick` says whether the USB stick's secret may pair: only until setup
+  // is done. Past that, it goes.
+  pair(request: PairRequest | undefined, boxId?: string, stick = false): Paired | { error: string } {
+    const live = this.pending && this.pending.until > this.now() ? this.pending : null;
+    if (!stick && this.handedPath) this.dropStick();
+    const handed = stick ? this.handed() : null;
+    if (!live && !handed) return { error: "That code ran out. Pair again from your TV." };
+    // A wrong try counts against the code on show. The stick's secret is 16
+    // random bytes, which nobody guesses, so it has no tries to run out of.
     const wrong = () => {
-      pending.tries++;
-      if (pending.tries >= CODE_TRIES) this.pending = null;
+      if (live) {
+        live.tries++;
+        if (live.tries >= CODE_TRIES) this.pending = null;
+      }
       return { error: "That isn't the code on your TV" };
     };
     const theirs = unb64u(request?.key, 32);
     const proof = unb64u(request?.proof, 32);
     if (!theirs || !proof) return wrong();
-    // Both are worked out and compared every time, so how long it takes
+    // Every one is worked out and compared every time, so how long it takes
     // says nothing about which was tried.
-    const bySecret = same(proof, hmac(pending.secret, INFO.pair, theirs));
-    const byCode = same(proof, hmac(Buffer.from(pending.code), INFO.pair, theirs));
-    if (!bySecret && !byCode) return wrong();
+    const none = Buffer.alloc(16);
+    const bySecret = same(proof, hmac(live?.secret ?? none, INFO.pair, theirs)) && live !== null;
+    const byCode = same(proof, hmac(Buffer.from(live?.code ?? ""), INFO.pair, theirs)) && live !== null;
+    const byStick = same(proof, hmac(handed ?? none, INFO.pair, theirs)) && handed !== null;
+    if (!bySecret && !byCode && !byStick) return wrong();
     const ours = x25519Pair(this.given?.(32));
     const shared = x25519Shared(ours.secret, theirs);
     if (!shared) return wrong();
-    const key = phoneKey(shared, bySecret ? pending.secret : Buffer.from(pending.code), theirs, ours.public);
-    this.pending = null;
+    const k = byStick ? handed! : bySecret ? live!.secret : Buffer.from(live!.code);
+    const key = phoneKey(shared, k, theirs, ours.public);
+    // The stick's secret pairs one phone, and leaves the code on show, if
+    // there is one, for another.
+    if (byStick) this.dropStick();
+    else this.pending = null;
     const name = request?.name;
     const label = (typeof name === "string" && name.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, NAME_MAX)) || "a phone";
     const phone: Phone = { id: `p-${this.random(4).toString("hex")}`, name: label, pairedAt: new Date(this.now()).toISOString() };
