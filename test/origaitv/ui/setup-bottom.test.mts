@@ -63,7 +63,7 @@ async function at(step: string, size: [number, number]): Promise<Page> {
   await page.mouse.move(1, 1);
   // The three games that didn't install, as the TV says so to setup.
   (daemon as unknown as { broadcast(event: string, data: unknown): void }).broadcast("setup-apps", FAILED);
-  await page.waitForFunction(() => /install/i.test(document.querySelector(".bar-info")?.textContent ?? ""));
+  await page.waitForFunction(() => /install|apps/i.test(document.querySelector(".bar-info")?.textContent ?? ""));
   return page;
 }
 
@@ -94,8 +94,16 @@ async function crowded(page: Page): Promise<string[]> {
     for (const part of [".bar-step", ".bar-info", ".bar-clock"]) {
       const el = document.querySelector(part) as HTMLElement | null;
       if (!el) continue;
-      const lines = Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight || "0"));
-      if (el.getClientRects().length !== 1 || lines > 1) said.push(`${part} is on more than one line: "${el.textContent}"`);
+      // One line's height, from a copy of the element with one letter in it
+      // that can't wrap, beside it in the same bar.
+      const probe = el.cloneNode(false) as HTMLElement;
+      probe.textContent = "X";
+      probe.style.whiteSpace = "nowrap";
+      el.after(probe);
+      const one = probe.getBoundingClientRect().height;
+      probe.remove();
+      const lines = Math.round(el.getBoundingClientRect().height / one);
+      if (lines !== 1) said.push(`${part} is ${lines} lines: "${el.textContent}"`);
       if (el.scrollWidth > el.clientWidth + 1) said.push(`${part} is cut short: "${el.textContent}"`);
     }
     return said;
@@ -140,6 +148,41 @@ for (const size of [
       assert.equal(await page.locator(".bar-info").textContent(), "Couldn't install 3 apps");
     } finally {
       await page.close();
+    }
+  });
+}
+
+for (const size of [
+  [1920, 1080],
+  [3840, 2160],
+] as [number, number][]) {
+  test(`T30.7 at ${size[0]}×${size[1]}, the longest status fits on one line next to the longest step: Claude and three apps that didn't set up`, async () => {
+    await fetch(`${url}/api/ai/cli`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "failed", error: "the download stopped" }) });
+    const page = await at("theme", size);
+    try {
+      await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't set up Claude or 3 apps");
+      assert.equal(await page.locator(".bar-step").textContent(), "11 of 12 · theme and background");
+      assert.deepEqual(await crowded(page), []);
+      // Something under way comes after what didn't work, so when the line
+      // is cut short, the cut takes the lesser news and what didn't work
+      // shows in full.
+      await fetch(`${url}/api/ai/cli`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "installing" }) });
+      await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't install 3 apps · Setting up Claude…");
+      const shown = await page.evaluate(() => {
+        const el = document.querySelector(".bar-info") as HTMLElement;
+        const probe = el.cloneNode(false) as HTMLElement;
+        probe.textContent = "Couldn't install 3 apps";
+        probe.style.cssText = "position: absolute; visibility: hidden; overflow: visible; width: auto";
+        el.after(probe);
+        const fits = probe.scrollWidth <= el.clientWidth;
+        probe.remove();
+        return fits;
+      });
+      assert.ok(shown, "what didn't work shows in full");
+      assert.deepEqual((await crowded(page)).filter((said) => !said.startsWith(".bar-info is cut short")), []);
+    } finally {
+      await page.close();
+      await fetch(`${url}/api/ai/cli`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "ready", version: "2.1.30 (Claude Code)" }) });
     }
   });
 }

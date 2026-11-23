@@ -68,6 +68,10 @@ function packNames(pack: SetupApp[]): string {
 }
 
 // What an install says in a line: the status bar's, while it runs.
+// How a line about apps that didn't install starts, for the bar to join it
+// with another thing that didn't work.
+export const COULDNT_INSTALL = "Couldn't install ";
+
 export function installLine(apps: Installs, names: Record<string, string>): string | null {
   const name = (id: string) => names[id] ?? id.replace(/^origaitv\./, "");
   const going = Object.keys(apps).filter((id) => apps[id].state === "queued" || apps[id].state === "installing");
@@ -75,7 +79,7 @@ export function installLine(apps: Installs, names: Record<string, string>): stri
   // One line in the bar, however many: an app by its name, or how many.
   const which = (ids: string[]) => (ids.length === 1 ? name(ids[0]) : `${ids.length} apps`);
   if (going.length) return `Installing ${which(going)}`;
-  if (failed.length) return `Couldn't install ${which(failed)}`;
+  if (failed.length) return `${COULDNT_INSTALL}${which(failed)}`;
   return null;
 }
 

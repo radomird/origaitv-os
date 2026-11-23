@@ -20,7 +20,7 @@ import { pad as pinPad, type Pad, type PadOptions } from "../launcher/pages/pin.
 import { Sounds } from "../launcher/sounds.ts";
 import { cliLine } from "./ai.ts";
 import { NEEDS_PIN, setup, type AiInfo, type Installs, type SetupInfo, type Step } from "./api.ts";
-import { installLine } from "./apps.ts";
+import { COULDNT_INSTALL, installLine } from "./apps.ts";
 import { bar, field } from "./frame.ts";
 import { Soundtrack } from "./music.ts";
 import { screenFor } from "./steps.ts";
@@ -291,12 +291,27 @@ function show(to: string, direction?: "forward" | "back"): void {
 
 // The status bar's right side: what the screen says, and after the AI step,
 // the provider's CLI arriving in the background, as the apps do after theirs.
-// It's one line, so the AI being ready gives way to news of the apps.
+// It's one line, cut short at its end if it must, so what didn't work comes
+// first, then the screen's own word, then what's under way. The AI being
+// ready gives way to any other news, and two things that didn't work are
+// one sentence: "Couldn't set up Claude or 3 apps".
 function barInfo(step: string, info: string): string {
-  const installing = step !== "apps" ? installLine(ctx.installs, ctx.names) : null;
-  const ready = ctx.ai?.cli?.state === "ready";
-  const cli = step !== "ai" && ctx.ai && !(ready && installing) ? cliLine(ctx.ai) : null;
-  return [info, cli, installing].filter(Boolean).join(" · ");
+  const cli = step !== "ai" && ctx.ai ? cliLine(ctx.ai) : null;
+  const apps = step !== "apps" ? installLine(ctx.installs, ctx.names) : null;
+  const cliState = ctx.ai?.cli?.state ?? "installing";
+  const appsFailed = Boolean(apps?.startsWith(COULDNT_INSTALL));
+  const news: [number, string][] = [];
+  if (info) news.push([1, info]);
+  if (cli && cliState === "failed" && apps && appsFailed) news.push([0, `${cli} or ${apps.slice(COULDNT_INSTALL.length)}`]);
+  else {
+    if (cli) news.push([cliState === "failed" ? 0 : cliState === "ready" ? 3 : 2, cli]);
+    if (apps) news.push([appsFailed ? 0 : 2, apps]);
+  }
+  const said = news.length > 1 ? news.filter(([rank]) => rank < 3) : news;
+  return said
+    .sort((a, b) => a[0] - b[0])
+    .map(([, text]) => text)
+    .join(" · ");
 }
 
 function put(to: string, next: View, direction?: "forward" | "back"): void {
