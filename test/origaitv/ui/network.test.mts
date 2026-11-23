@@ -140,7 +140,7 @@ bothWays("discover", "an app's setup lists the servers on your network first, an
     assert.equal(await page.locator("[data-found] .found-name").innerText(), "living room · 127.0.0.1:8096");
     // The first server found has the focus, and typing is the row after it.
     await page.waitForSelector('.focused[data-found="jellyfin http://127.0.0.1:8096"]');
-    assert.equal(await page.locator('[data-action="type-address"]').innerText(), "type its address");
+    assert.equal(await page.locator('[data-action="type-address"]').innerText(), "enter the address manually");
     assert.equal(await page.locator('input[data-field="serverUrl"]').isVisible(), false);
     // Typing instead shows the field, with the focus, for the phone's keyboard.
     await page.keyboard.press("ArrowDown");
@@ -299,7 +299,8 @@ bothWays("discover", "setup's apps step opens the servers on your network for ea
     assert.match(await page.locator(".setup-page .prompt").innerText(), /origaitv app setup jellyfin/);
     await page.waitForSelector('.focused[data-found="jellyfin http://127.0.0.1:8096"]');
     assert.deepEqual(await rows(page, "[data-found]"), [["living room", "127.0.0.1:8096"]]);
-    assert.deepEqual(await page.locator(".found > .button").allInnerTexts(), ["type its address", "later"]);
+    assert.deepEqual(await page.locator(".found .setup-actions > .button").allInnerTexts(), ["enter the address manually", "later"]);
+    assert.equal(await page.locator('[data-line="found"]').innerText(), "found on your network");
     assert.match(await page.locator(".bar").innerText(), /apps/);
     assert.doesNotMatch(await page.locator(".bar").innerText(), /move|pick|↵|esc/, "no key hints in the bar");
     // OK on it: Jellyfin will use it, and Immich's page is next.
@@ -355,6 +356,42 @@ test("setup's apps step on music lists the NASes on your network, and a NAS's fo
   }
 });
 
+test("T30.9 setup's Jellyfin page is drawn like the other new screens, stops looking after its wait and says none was found", async () => {
+  // Nothing answers on this network.
+  const { daemon, url, state } = await startBox(0, FIXTURES, { builtins: true, features: { discover: true } });
+  atApps(state, "media");
+  try {
+    const page = await tv(url);
+    await page.waitForSelector(".apps-page .app-pick.focused");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector('[data-app="origaitv.jellyfin"].on');
+    await page.locator('[data-action="continue"]').click();
+    await headline(page, "Pick your Jellyfin");
+    // The new screens' padding: the headline and its line in the safe area,
+    // 80 px from the left and 60 from the top, once it's slid in.
+    await page.waitForTimeout(600);
+    const at = await page.evaluate(() => {
+      const zoom = Number(document.documentElement.style.zoom) || 1;
+      const prompt = document.querySelector(".setup-page .prompt")!.getBoundingClientRect();
+      return [Math.round(prompt.left / zoom), Math.round(prompt.top / zoom)];
+    });
+    assert.deepEqual(at, [80, 60]);
+    assert.ok(await page.locator(".setup-page.d3").count());
+    assert.equal(await page.locator('[data-line="found"]').innerText(), "looking on your network…");
+    assert.equal(await page.locator('[data-action="type-address"]').innerText(), "enter the address manually");
+    assert.equal(await page.locator(".focused").getAttribute("data-action"), "type-address");
+    // After its wait it says none was found, and asks the box no more.
+    await page.waitForFunction(() => document.querySelector('[data-line="found"]')?.textContent === "No Jellyfin found on your network", null, { timeout: 25_000 });
+    assert.equal(await page.locator(".focused").getAttribute("data-action"), "type-address");
+    // Typing it shows the field, with the focus, for the phone's keyboard.
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => (document.activeElement as HTMLInputElement | null)?.dataset.field === "address");
+    await page.close();
+  } finally {
+    await daemon.close();
+  }
+});
+
 // A phone paired with the box, on its remote.
 async function phoneOn(daemon: Daemon, url: string): Promise<Page> {
   await fetch(`${url}/api/phones/pair`, { method: "POST" });
@@ -383,7 +420,7 @@ bothWays("discover", "the phone shows what's on your network while the TV does, 
     await phone.waitForSelector('.r2-network [data-found="jellyfin http://127.0.0.1:8096"]');
     assert.equal(await phone.locator(".r2-network-head span").first().innerText(), "On your network");
     // A server's row has its address beside its name, from its own link.
-    assert.deepEqual(await phone.locator(".r2-network-row").allInnerTexts(), ["living room · 127.0.0.1:8096", "Type its address"]);
+    assert.deepEqual(await phone.locator(".r2-network-row").allInnerTexts(), ["living room · 127.0.0.1:8096", "Enter the address manually"]);
     assert.ok(await phone.evaluate(() => document.documentElement.scrollHeight <= innerHeight), "nothing scrolls");
     // "Type an address" opens the TV's field, and the phone's keyboard comes.
     await phone.locator('.r2-network [data-found="typed"]').tap();

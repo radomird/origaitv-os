@@ -1794,3 +1794,22 @@ body.counted .player-note {
 .setup-fit .fit-controls {
   margin-top: 8px;
 }
+
+/* What's on your network, in setup's apps step, with setup's own switch on:
+   the headline and how the looking goes, the finds, and the two choices in
+   a row under them. */
+.setup-page.d3.servers2 .found {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 960px;
+  margin-top: 48px;
+}
+
+.setup-page.d3.servers2 .setup-actions {
+  margin-top: 16px;
+}
+
+.setup-page.d3.servers2 .found-list:has(.found-rows:empty) {
+  display: none;
+}
