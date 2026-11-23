@@ -98,6 +98,8 @@ export interface BoxOptions {
   planUsage?: ConstructorParameters<typeof Daemon>[0]["planUsage"];
   // How long the listening bar waits for new words (ADR-054).
   listenIdleMs?: number;
+  // How often the daemon looks at the builds after its first look (2000).
+  buildsEveryMs?: number;
   // A stand-in for TMDB, through the router's service (stage 8).
   tmdb?: TmdbGet;
   // Feature switches to set (daemon/features.ts). Every switch is on by
@@ -374,6 +376,7 @@ export async function startBox(
     router: options.router,
     planUsage: options.planUsage ?? (async () => null),
     listenIdleMs: options.listenIdleMs,
+    buildsEveryMs: options.buildsEveryMs,
     box: options.box ?? { machine: machine("nuc8i5beh") },
     // The channel, as origaitv channel keeps it: none, so stable, until a test
     // puts the box on edge (ADR-053).

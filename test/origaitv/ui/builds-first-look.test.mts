@@ -1,5 +1,5 @@
 // T29.5: the daemon's first look at the builds is quiet, in a real Chromium.
-// It looks as it starts, so two seconds in it has nothing new to say, and
+// It looks as it starts, so at its next look it has nothing new to say, and
 // the page on screen isn't drawn again for nothing. A build that really
 // moves on is still heard at the next look, and its page follows. And a word
 // about the builds draws again only the page that was in front when it
@@ -25,13 +25,18 @@ let state = "";
 let builds = "";
 let started = 0;
 const errors: string[] = [];
+// How often this test's daemon looks at the builds after its first look.
+// The TV looks every two seconds. Here it's longer, so home is open before
+// the first of those looks even on a busy runner: that look is the one the
+// first test is about, and a page that opened after it would see nothing.
+const EVERY = 6000;
 
 before(async () => {
   // The browser first, so its own start doesn't count against the
   // daemon's two seconds: on a busy machine it alone can take one.
   browser = await chromium.launch({ executablePath: process.env.ORIGAITV_UI_BROWSER });
   started = Date.now();
-  ({ daemon, url, state, builds } = await startBox(0, undefined, { features: PHASE_1 }));
+  ({ daemon, url, state, builds } = await startBox(0, undefined, { features: PHASE_1, buildsEveryMs: EVERY }));
 });
 
 after(async () => {
@@ -76,14 +81,13 @@ function build(change: Record<string, unknown>): void {
   writeFileSync(join(dir, "status.json"), JSON.stringify({ build: "b1", id: "local.blocks", version: "1.0.0", phase: "build", state: "running", steps: [], started: "", at: new Date().toISOString(), ...change }));
 }
 
-test("T29.5 two seconds after the daemon starts with nothing new, the page on screen isn't drawn again", async () => {
+test("T29.5 at the daemon's first look after it starts, with nothing new, the page on screen isn't drawn again", async () => {
   const page = await tv();
   try {
-    assert.ok(Date.now() - started < 2000, `home was open ${Date.now() - started} ms after the daemon started, before its look two seconds in`);
+    assert.ok(Date.now() - started < EVERY, `home was open ${Date.now() - started} ms after the daemon started, before its first look at ${EVERY} ms`);
     await keep(page);
-    // Past the look two seconds in, with time for a list to be asked for
-    // and drawn.
-    await page.waitForTimeout(Math.max(0, started + 3000 - Date.now()));
+    // Past that look, with time for a list to be asked for and drawn.
+    await page.waitForTimeout(Math.max(0, started + EVERY + 1000 - Date.now()));
     assert.equal(await heard(page), 0, "no word about the builds");
     assert.ok(await stillKept(page), "home wasn't drawn again");
   } finally {
@@ -95,13 +99,14 @@ test("T29.5 a build that moves on is heard at the next look, and its page follow
   const page = await tv();
   try {
     build({ steps: [{ id: "design", state: "running" }] });
-    await page.waitForFunction(() => (window as unknown as { heard: { builds: number } }).heard.builds > 0, undefined, { timeout: 5000 });
+    await page.waitForFunction(() => (window as unknown as { heard: { builds: number } }).heard.builds > 0, undefined, { timeout: EVERY + 3000 });
     await go(page, "build/b1");
     await page.waitForFunction(() => document.querySelector(".build-page")?.getAttribute("data-state") === "running");
     const asked = Date.now();
     build({ state: "failed", reason: "its tests didn't pass" });
-    await page.waitForFunction(() => document.querySelector(".build-page")?.getAttribute("data-state") === "failed", undefined, { timeout: 5000 });
-    assert.ok(Date.now() - asked < 2500, `the page followed in ${Date.now() - asked} ms`);
+    await page.waitForFunction(() => document.querySelector(".build-page")?.getAttribute("data-state") === "failed", undefined, { timeout: EVERY + 3000 });
+    // At the next look, and no later.
+    assert.ok(Date.now() - asked < EVERY + 500, `the page followed in ${Date.now() - asked} ms`);
   } finally {
     await page.close();
   }
