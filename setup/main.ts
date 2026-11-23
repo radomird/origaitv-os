@@ -403,6 +403,20 @@ async function start(): Promise<void> {
     .catch(() => {});
   ctx.updates = await daemon.updates().catch(() => ctx.updates);
   ctx.ai = await setup.ai().catch(() => undefined);
+  // Past the apps step, the apps' names and how their installs went, so the
+  // bar can name them after the page loads again.
+  if (ctx.info.setup.finished.apps) {
+    void setup.apps().then(
+      (list) => {
+        for (const app of [...(list.starter ?? []), ...list.for, ...(list.games ?? []), ...list.more]) {
+          ctx.names[app.id] = app.name;
+          if (app.state && !ctx.installs[app.id]) ctx.installs[app.id] = { state: app.state, ...(app.error ? { error: app.error } : {}) };
+        }
+        if (view) ctx.status(view.info ?? "");
+      },
+      () => {},
+    );
+  }
   show(ctx.info.setup.step);
   document.body.append(music.el);
   void music.start(ctx.info.setup.muted);

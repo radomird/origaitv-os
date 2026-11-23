@@ -4,7 +4,9 @@
 // bar's status wrapped onto two lines next to "11 of 12 · theme and
 // background". Here nothing a person can press overlaps the player or comes
 // within 24 px of the bar, and the bar is one line, with the status Radomir
-// saw: Claude ready and three games that didn't install.
+// saw: Claude ready and three games that didn't install, each by its name.
+// That's longer than the bar has room for, so the bar cuts it short at its
+// end, and what didn't work comes first.
 
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
@@ -13,7 +15,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { Browser, Page } from "playwright-core";
 import type { Daemon } from "../../../daemon/server.ts";
-import { startBox } from "./box.mts";
+import { OFFICIAL, startBox } from "./box.mts";
 
 const require = createRequire(`${process.env.ORIGAITV_UI_MODULES}/`);
 const { chromium } = require("playwright-core") as typeof import("playwright-core");
@@ -21,6 +23,15 @@ const { chromium } = require("playwright-core") as typeof import("playwright-cor
 const TV = { output: "HDMI-A-1", modes: ["3840x2160@60.00Hz", "1920x1080@60.00Hz"], live: { mode: "3840x2160@60", scale: 2 } };
 const STEPS = ["welcome", "ready", "country", "ai", "people", "goal", "apps", "look", "theme", "background"];
 const FAILED = { "origaitv.steam": { state: "failed" }, "origaitv.battlenet": { state: "failed" }, "origaitv.retroarch": { state: "failed" } };
+// Battle.net and RetroArch in the app list too, so setup knows their names.
+const CATALOG = [
+  ...OFFICIAL,
+  ...[
+    { id: "origaitv.battlenet", name: "Battle.net", description: "Blizzard's games on the TV" },
+    { id: "origaitv.retroarch", name: "RetroArch", description: "Older consoles' games on the TV" },
+  ].map((app) => ({ ...OFFICIAL[0], ...app, path: `apps/${app.id.replace("origaitv.", "")}` })),
+];
+const NAMED = "Couldn't install Steam, Battle.net and RetroArch";
 
 let browser: Browser;
 let daemon: Daemon;
@@ -29,7 +40,7 @@ let state = "";
 const errors: string[] = [];
 
 before(async () => {
-  ({ daemon, url, state } = await startBox(0, undefined, { features: { setup2: true, looks: true, sizes: true } }));
+  ({ daemon, url, state } = await startBox(0, undefined, { features: { setup2: true, looks: true, sizes: true }, catalog: CATALOG }));
   await fetch(`${url}/api/display/tv`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(TV) });
   const post = (path: string, body: unknown) => fetch(`${url}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   // Claude's plan, its terms accepted and its tool in, as on the NUC.
@@ -63,13 +74,30 @@ async function at(step: string, size: [number, number]): Promise<Page> {
   await page.mouse.move(1, 1);
   // The three games that didn't install, as the TV says so to setup.
   (daemon as unknown as { broadcast(event: string, data: unknown): void }).broadcast("setup-apps", FAILED);
-  await page.waitForFunction(() => /install|apps/i.test(document.querySelector(".bar-info")?.textContent ?? ""));
+  await page.waitForFunction(() => /couldn't/i.test(document.querySelector(".bar-info")?.textContent ?? ""));
   return page;
+}
+
+// Whether the start of the bar's status shows in full, however the rest of
+// it is cut short.
+function startShows(page: Page, start: string): Promise<boolean> {
+  return page.evaluate((start) => {
+    const el = document.querySelector(".bar-info") as HTMLElement;
+    if (!el.textContent?.startsWith(start)) return false;
+    const probe = el.cloneNode(false) as HTMLElement;
+    probe.textContent = start;
+    probe.style.cssText = "position: absolute; visibility: hidden; overflow: visible; width: auto";
+    el.after(probe);
+    const fits = probe.scrollWidth <= el.clientWidth;
+    probe.remove();
+    return fits;
+  }, start);
 }
 
 // What's wrong at the bottom: anything to press, or the sizes, that
 // overlaps the player or comes within 24 px of the bar, in the canvas's own
-// pixels; and a bar that isn't one line, or whose status is cut short.
+// pixels; and a bar that isn't one line, or whose step or clock is cut
+// short. The status may be cut at its end: startShows checks its start.
 async function crowded(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const zoom = Number(document.documentElement.style.zoom) || 1;
@@ -104,7 +132,7 @@ async function crowded(page: Page): Promise<string[]> {
       probe.remove();
       const lines = Math.round(el.getBoundingClientRect().height / one);
       if (lines !== 1) said.push(`${part} is ${lines} lines: "${el.textContent}"`);
-      if (el.scrollWidth > el.clientWidth + 1) said.push(`${part} is cut short: "${el.textContent}"`);
+      if (part !== ".bar-info" && el.scrollWidth > el.clientWidth + 1) said.push(`${part} is cut short: "${el.textContent}"`);
     }
     return said;
   });
@@ -145,7 +173,9 @@ for (const size of [
     try {
       assert.deepEqual(await crowded(page), []);
       assert.equal(await page.locator(".bar-step").textContent(), "11 of 12 · theme and background");
-      assert.equal(await page.locator(".bar-info").textContent(), "Couldn't install 3 apps");
+      await page.waitForFunction((named) => document.querySelector(".bar-info")?.textContent === named, NAMED);
+      assert.deepEqual(await crowded(page), []);
+      assert.ok(await startShows(page, "Couldn't install Steam"), "the start of what didn't install shows");
     } finally {
       await page.close();
     }
@@ -156,30 +186,21 @@ for (const size of [
   [1920, 1080],
   [3840, 2160],
 ] as [number, number][]) {
-  test(`T30.7 at ${size[0]}×${size[1]}, the longest status fits on one line next to the longest step: Claude and three apps that didn't set up`, async () => {
+  test(`T30.7 at ${size[0]}×${size[1]}, the longest status stays one line next to the longest step, and what didn't work shows first`, async () => {
     await fetch(`${url}/api/ai/cli`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "failed", error: "the download stopped" }) });
     const page = await at("theme", size);
     try {
-      await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't set up Claude or 3 apps");
+      // Claude and three games that didn't set up: one sentence, cut short
+      // at its end.
+      await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't set up Claude or Steam, Battle.net and RetroArch");
       assert.equal(await page.locator(".bar-step").textContent(), "11 of 12 · theme and background");
       assert.deepEqual(await crowded(page), []);
-      // Something under way comes after what didn't work, so when the line
-      // is cut short, the cut takes the lesser news and what didn't work
-      // shows in full.
+      assert.ok(await startShows(page, "Couldn't set up Claude or Steam"), "what didn't work shows first");
+      // Something under way comes after what didn't work.
       await fetch(`${url}/api/ai/cli`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "installing" }) });
-      await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't install 3 apps · Setting up Claude…");
-      const shown = await page.evaluate(() => {
-        const el = document.querySelector(".bar-info") as HTMLElement;
-        const probe = el.cloneNode(false) as HTMLElement;
-        probe.textContent = "Couldn't install 3 apps";
-        probe.style.cssText = "position: absolute; visibility: hidden; overflow: visible; width: auto";
-        el.after(probe);
-        const fits = probe.scrollWidth <= el.clientWidth;
-        probe.remove();
-        return fits;
-      });
-      assert.ok(shown, "what didn't work shows in full");
-      assert.deepEqual((await crowded(page)).filter((said) => !said.startsWith(".bar-info is cut short")), []);
+      await page.waitForFunction((named) => document.querySelector(".bar-info")?.textContent === `${named} · Setting up Claude…`, NAMED);
+      assert.deepEqual(await crowded(page), []);
+      assert.ok(await startShows(page, "Couldn't install Steam"), "what didn't work shows first");
     } finally {
       await page.close();
       await fetch(`${url}/api/ai/cli`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "ready", version: "2.1.30 (Claude Code)" }) });
@@ -191,7 +212,8 @@ test("T30.7 the bar names one app that didn't install, and says Claude is ready 
   const page = await at("theme", [1920, 1080]);
   try {
     (daemon as unknown as { broadcast(event: string, data: unknown): void }).broadcast("setup-apps", { "origaitv.steam": { state: "failed" } });
-    await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't install steam");
+    await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Couldn't install Steam");
+    assert.deepEqual(await crowded(page), []);
     (daemon as unknown as { broadcast(event: string, data: unknown): void }).broadcast("setup-apps", { "origaitv.steam": { state: "installed" } });
     await page.waitForFunction(() => document.querySelector(".bar-info")?.textContent === "Claude is ready");
   } finally {
