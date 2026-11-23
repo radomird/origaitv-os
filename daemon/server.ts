@@ -616,7 +616,7 @@ export class Daemon {
     this.setupState = new Setup({ path: join(options.state, "setup.json"), on: (feature) => this.features.on(feature) });
     this.ai = new Ai({ state: options.state, channel: () => this.channel() });
     this.aiIcons = new AiIcons({ state: options.state, userAgent: userAgent(options.root), sites: options.aiSites, log: this.log });
-    this.planSignIn = new PlanSignIn({ state: options.state, drop: join(options.state, "build-drop"), run: options.buildRun ?? "/run/origaitv-build" });
+    this.planSignIn = new PlanSignIn({ state: options.state, drop: join(options.state, "build-drop"), run: options.buildRun ?? "/run/origaitv-build", signedIn: (provider) => this.planSignedIn(provider) });
     this.planUsages = new PlanUsages({ ask: options.planUsage ?? ((provider) => usageViaSocket(ROUTER_SOCKETS.cli, provider)) });
     this.buildAwake = options.inhibitor?.("building an app") ?? { set: () => {} };
     this.builds = new Builds({
@@ -1348,6 +1348,32 @@ export class Daemon {
   private boxRoute(sentence: string, apps: RouterApp[]): Promise<Routed> {
     this.routing ??= boxRouter({ ai: () => this.ai.read(), key: () => this.key.status(), fetchCli: () => void this.fetchAiCli("an ask found it missing") });
     return this.routing(sentence, apps);
+  }
+
+  // The plan's sign-in is done. At setup's AI step, with that plan picked,
+  // setup moves on by itself, as it does when the location is set on the
+  // phone: the TV follows, whichever phone or page finished the sign-in.
+  private async planSignedIn(provider: Provider): Promise<void> {
+    const setup = await this.setupState.read();
+    if (setup.done || setup.step !== "ai") return;
+    const ai = await this.ai.read();
+    if (ai.provider !== provider || ai.path !== "plan" || !ai.accepted) return;
+    const moved = (await this.setupState.finish("ai")).state;
+    if (!moved) return;
+    this.log(`setup: ${OFFERS[provider].plan.name} is signed in, so the AI step is finished, on to ${moved.step}`);
+    this.broadcast("setup", moved);
+  }
+
+  // At setup's AI step, a plan whose terms were just accepted starts its
+  // sign-in right away, so the phone that accepted them shows it next.
+  private async startPlanSignIn(ai: { provider: Provider | null; path: string | null; accepted: unknown }): Promise<void> {
+    if (!ai.provider || ai.path !== "plan" || !ai.accepted || !OFFERS[ai.provider].plan.offered) return;
+    const setup = await this.setupState.read();
+    if (setup.done || setup.step !== "ai") return;
+    const now = await this.planSignIn.state().catch(() => null);
+    if (now && now.provider === ai.provider && (now.signedIn || now.now?.state !== "failed")) return;
+    await this.planSignIn.start(ai.provider);
+    this.log(`setup started ${OFFERS[ai.provider].plan.name}'s sign-in, as its terms were accepted`);
   }
 
   // The AI's own CLI, which a plan routes through and every build runs,
@@ -2092,6 +2118,7 @@ export class Daemon {
       this.log(`${viewer.name} accepted ${result.state.provider}'s terms for ${result.state.path === "plan" ? "a plan" : "a key"}, on ${phone.name}`);
       this.broadcast("ai", result.state);
       void this.fetchAiCli("its terms were accepted");
+      await this.startPlanSignIn(result.state).catch((error) => this.log(`couldn't start the plan's sign-in: ${(error as Error).message}`));
       this.json(response, 200, { ok: true, accepted: result.state.accepted });
       return;
     }
