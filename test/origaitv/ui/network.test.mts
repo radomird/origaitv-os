@@ -68,9 +68,11 @@ after(async () => {
 
 // A TV at 1080p with a stand-in for the screen daemon, which takes Music's
 // requests as the TV session does.
-async function tv(at: string): Promise<Page> {
-  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+async function tv(at: string, size: [number, number] = [1920, 1080], clock = false): Promise<Page> {
+  const page = await browser.newPage({ viewport: { width: size[0], height: size[1] } });
   page.on("pageerror", (error) => errors.push(error.message));
+  // A clock the test can move on, for a wait of tens of seconds.
+  if (clock) await page.clock.install();
   await page.addInitScript(() => {
     const w = window as unknown as { screenRequests: Record<string, unknown>[]; origaitvScreen: (json: string) => void; origaitvScreenReply?: (id: number, reply: string) => void };
     w.screenRequests = [];
@@ -356,41 +358,61 @@ test("setup's apps step on music lists the NASes on your network, and a NAS's fo
   }
 });
 
-test("T30.9 setup's Jellyfin page is drawn like the other new screens, stops looking after its wait and says none was found", async () => {
-  // Nothing answers on this network.
-  const { daemon, url, state } = await startBox(0, FIXTURES, { builtins: true, features: { discover: true } });
-  atApps(state, "media");
-  try {
-    const page = await tv(url);
-    await page.waitForSelector(".apps-page .app-pick.focused");
-    await page.keyboard.press("Enter");
-    await page.waitForSelector('[data-app="origaitv.jellyfin"].on');
-    await page.locator('[data-action="continue"]').click();
-    await headline(page, "Pick your Jellyfin");
-    // The new screens' padding: the headline and its line in the safe area,
-    // 80 px from the left and 60 from the top, once it's slid in.
-    await page.waitForTimeout(600);
-    const at = await page.evaluate(() => {
-      const zoom = Number(document.documentElement.style.zoom) || 1;
-      const prompt = document.querySelector(".setup-page .prompt")!.getBoundingClientRect();
-      return [Math.round(prompt.left / zoom), Math.round(prompt.top / zoom)];
-    });
-    assert.deepEqual(at, [80, 60]);
-    assert.ok(await page.locator(".setup-page.d3").count());
-    assert.equal(await page.locator('[data-line="found"]').innerText(), "looking on your network…");
-    assert.equal(await page.locator('[data-action="type-address"]').innerText(), "enter the address manually");
-    assert.equal(await page.locator(".focused").getAttribute("data-action"), "type-address");
-    // After its wait it says none was found, and asks the box no more.
-    await page.waitForFunction(() => document.querySelector('[data-line="found"]')?.textContent === "No Jellyfin found on your network", null, { timeout: 25_000 });
-    assert.equal(await page.locator(".focused").getAttribute("data-action"), "type-address");
-    // Typing it shows the field, with the focus, for the phone's keyboard.
-    await page.keyboard.press("Enter");
-    await page.waitForFunction(() => (document.activeElement as HTMLInputElement | null)?.dataset.field === "address");
-    await page.close();
-  } finally {
-    await daemon.close();
-  }
-});
+for (const size of [
+  [1920, 1080],
+  [3840, 2160],
+] as [number, number][]) {
+  test(`T30.9 at ${size[0]}×${size[1]}, setup's Jellyfin page is drawn like the other new screens, stops looking after its wait and says none was found`, async () => {
+    // Nothing answers on this network.
+    const { daemon, url, state } = await startBox(0, FIXTURES, { builtins: true, features: { discover: true } });
+    atApps(state, "media");
+    try {
+      const page = await tv(url, size, true);
+      // Each time the page asks the TV what's on the network, which keeps
+      // the TV looking.
+      let asks = 0;
+      page.on("request", (request) => {
+        if (request.url().includes("/api/discover?kinds=")) asks++;
+      });
+      await page.waitForSelector(".apps-page .app-pick.focused");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector('[data-app="origaitv.jellyfin"].on');
+      await page.locator('[data-action="continue"]').click();
+      await headline(page, "Pick your Jellyfin");
+      // The new screens' padding: the headline and its line in the safe
+      // area, 80 px from the left and 60 from the top, once it's slid in.
+      await page.waitForTimeout(600);
+      const at = await page.evaluate(() => {
+        const zoom = Number(document.documentElement.style.zoom) || 1;
+        const prompt = document.querySelector(".setup-page .prompt")!.getBoundingClientRect();
+        return [Math.round(prompt.left / zoom), Math.round(prompt.top / zoom)];
+      });
+      assert.deepEqual(at, [80, 60]);
+      assert.ok(await page.locator(".setup-page.d3").count());
+      assert.equal(await page.locator('[data-line="found"]').innerText(), "looking on your network…");
+      assert.equal(await page.locator('[data-action="type-address"]').innerText(), "enter the address manually");
+      assert.equal(await page.locator(".focused").getAttribute("data-action"), "type-address");
+      assert.ok(asks >= 1, "it asked as it opened");
+      // After its wait it says none was found.
+      await page.clock.runFor(21_000);
+      await page.waitForFunction(() => document.querySelector('[data-line="found"]')?.textContent === "No Jellyfin found on your network");
+      // And it asks no more: a list still asking would have asked twice in
+      // the next 45 seconds.
+      const then = asks;
+      await page.clock.runFor(45_000);
+      await page.waitForTimeout(300);
+      assert.equal(asks, then, "no more asks after the wait");
+      assert.equal(await page.locator('[data-line="found"]').textContent(), "No Jellyfin found on your network");
+      assert.equal(await page.locator(".focused").getAttribute("data-action"), "type-address");
+      // Typing it shows the field, with the focus, for the phone's keyboard.
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => (document.activeElement as HTMLInputElement | null)?.dataset.field === "address");
+      await page.close();
+    } finally {
+      await daemon.close();
+    }
+  });
+}
 
 // A phone paired with the box, on its remote.
 async function phoneOn(daemon: Daemon, url: string): Promise<Page> {

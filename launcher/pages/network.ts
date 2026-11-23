@@ -261,6 +261,9 @@ export function foundList(options: ListOptions): { el: HTMLElement; rows: HTMLEl
   };
   const again = () => {
     if (gone()) return stop();
+    // Past its wait, even when the timer that asks fires in the same
+    // moment as the one that ends it.
+    if (options.waitMs !== undefined && Date.now() - born >= options.waitMs) return clearInterval(timer);
     const at = spoke;
     void ask<never>(`/api/discover?kinds=${kinds}`).then(
       (answer) => spoke === at && draw(answer),
