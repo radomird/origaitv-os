@@ -496,6 +496,18 @@ function signIn(name: string): HTMLElement {
     pass,
     h("button", { class: "button primary", type: "submit", "data-action": "sign-in" }, glyph("lock", 20), h("span", {}, "Sign in")),
     h("p", { class: "note" }, "Your password manager can fill these. OrigaiTV never saves them."),
+    // The TV shows only the service's page (ADR-136), so this is where
+    // "I'm signed in" is. The TV moves on by itself once it can tell.
+    h(
+      "button",
+      {
+        class: "button",
+        type: "button",
+        "data-action": "signed-in",
+        onclick: () => void api("POST", "/api/phone/signed-in").then(() => undefined, (error) => failed(error)),
+      },
+      "I'm signed in",
+    ),
   );
   form.addEventListener("submit", (event) => {
     event.preventDefault();

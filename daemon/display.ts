@@ -475,7 +475,7 @@ function liveOf(monitor: Monitor): { mode: string; scale: number } {
 // The monitor's rule, as the screen daemon sets it with hyprctl eval and
 // session/hypr.lua at the session's start: the mode, the scale, and the
 // reserved area Hyprland keeps clear of maximized windows and of the layers
-// that keep a zone for themselves, such as the sign-in bar.
+// that keep a zone for themselves.
 export function monitorRule(target: Target): string {
   const [x, y] = target.reserved;
   return `hl.monitor({ output = "${target.output}", mode = "${target.mode}", position = "auto", scale = ${target.scale}, reserved = { top = ${y}, right = ${x}, bottom = ${y}, left = ${x} } })`;
@@ -521,8 +521,7 @@ export class DisplayWatch {
   // Fit to screen's margin as Hyprland keeps it, left and top, from the
   // monitor's reserved area, or what this set last when Hyprland doesn't
   // say. A monitor that comes back, as a TV does from standby, has its rule
-  // set again by Hyprland, and this is where it shows if it didn't. The
-  // bottom can have the sign-in bar's own zone in it too.
+  // set again by Hyprland, and this is where it shows if it didn't.
   private reservedOf(monitor: Monitor | null): [number, number] {
     const area = monitor?.reserved;
     return Array.isArray(area) && area.length === 4 && area.every((n) => Number.isFinite(n)) ? [area[0], area[1]] : this.reserved;

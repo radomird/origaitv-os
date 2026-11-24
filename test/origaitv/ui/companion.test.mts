@@ -265,6 +265,12 @@ test("S4.9 on the TV's sign-in screen, the phone offers fields its password mana
   await until(() => remote.length >= 4);
   assert.deepEqual(remote, ['{"text":"ana@example.org"}', '{"key":"tab"}', '{"text":"correct horse"}', '{"key":"enter"}']);
   assert.equal(await hand.locator("#password").inputValue(), "", "the phone forgets it once it's sent");
+  // The TV shows only the service's page, so I'm signed in is on the phone
+  // (ADR-136, T30.11): the TV asks the app now.
+  remote.length = 0;
+  await hand.locator('[data-action="signed-in"]').tap();
+  await until(() => remote.length >= 1);
+  assert.deepEqual(remote, ['{"cmd":"signed-in"}']);
   await post("/api/sign-in-screen", { app: null });
   await hand.close();
 });

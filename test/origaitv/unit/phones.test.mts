@@ -540,6 +540,7 @@ test("S4.7 S4.8 S4.9 the phone arranges home, hears about an update, and signs i
   // Nothing signing in on the TV: the phone's fields aren't offered.
   assert.equal((await send(phone, "GET", "/api/phone/state", { token })).data.signIn, null);
   assert.equal((await send(phone, "POST", "/api/phone/sign-in", { token, body: { username: "a@b.c", password: "pw" } })).status, 409);
+  assert.equal((await send(phone, "POST", "/api/phone/signed-in", { token })).status, 409);
   assert.equal((await send(tv, "POST", "/api/sign-in-screen", { body: { app: "origaitv.tube", name: "Tube" } })).status, 200);
   assert.deepEqual((await send(phone, "GET", "/api/phone/state", { token })).data.signIn, { name: "Tube" });
   const controller = new AbortController();
@@ -553,11 +554,13 @@ test("S4.7 S4.8 S4.9 the phone arranges home, hears about an update, and signs i
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal((await send(phone, "POST", "/api/phone/sign-in", { token, body: { username: "ana@example.org", password: "" } })).status, 400);
   assert.deepEqual((await send(phone, "POST", "/api/phone/sign-in", { token, body: { username: "ana@example.org", password: "correct horse" } })).data, { ok: true });
+  // I'm signed in on the phone (ADR-136): the TV asks the app now.
+  assert.deepEqual((await send(phone, "POST", "/api/phone/signed-in", { token })).data, { ok: true });
   // Install now from the phone goes to the TV session, past the PIN.
   assert.equal((await send(phone, "POST", "/api/phone/updates/install", { token })).status, 403);
   assert.equal((await send(phone, "POST", "/api/phone/updates/install", { token, grant })).status, 200);
   await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.deepEqual(got, ['{"text":"ana@example.org"}', '{"key":"tab"}', '{"text":"correct horse"}', '{"key":"enter"}', '{"cmd":"update-install"}']);
+  assert.deepEqual(got, ['{"text":"ana@example.org"}', '{"key":"tab"}', '{"text":"correct horse"}', '{"key":"enter"}', '{"cmd":"signed-in"}', '{"cmd":"update-install"}']);
   assert.ok(!lines.join("\n").includes("correct horse") && !lines.join("\n").includes("ana@example.org"));
   await send(tv, "POST", "/api/sign-in-screen", { body: { app: null } });
   assert.equal((await send(phone, "GET", "/api/phone/state", { token })).data.signIn, null);

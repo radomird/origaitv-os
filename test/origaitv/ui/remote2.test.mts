@@ -193,6 +193,26 @@ test("T8.3 a password's field is the phone's password field, for its password ma
   await hand.close();
 });
 
+test("T30.11 during a sign-in the keyboard has I'm signed in, which asks the TV to check now, and a search's keyboard doesn't", async () => {
+  const b = await box(true);
+  const post = (path: string, body: object) => fetch(`${b.url}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  await post("/api/sign-in-screen", { app: "origaitv.tube", name: "Tube" });
+  const hand = await phone(b, "#tv-text");
+  assert.equal(await hand.locator(".r2-where").textContent(), "Tube · sign in");
+  const button = hand.locator('[data-action="signed-in"]');
+  assert.equal(await button.textContent(), "I'm signed in");
+  const found = await button.boundingBox();
+  assert.ok(found && found.y >= 0 && found.y + found.height <= PHONE.height, "it's on the screen");
+  await button.tap();
+  await until(() => b.commands.includes("signed-in"), 3000, "the TV asked to check now");
+  // Not signing in: a search's keyboard has no such button.
+  await post("/api/sign-in-screen", { app: null });
+  await context(b, { front: "app", playing: false, appField: { kind: "search", label: "search", value: "", app: "origaitv.tube" } });
+  await hand.waitForSelector(".r2-where >> text=Tube · search", { timeout: 3000 });
+  assert.equal(await button.count(), 0);
+  await hand.close();
+});
+
 test("T8.3 the surface: a swipe moves the focus, a tap is OK, and a hold opens details on an app's tile and gives the pointer everywhere else, which moves and clicks", async () => {
   const b = await box(true);
   const hand = await phone(b);
