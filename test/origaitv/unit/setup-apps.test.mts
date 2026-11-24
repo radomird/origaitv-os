@@ -334,7 +334,7 @@ test("a game whose install didn't work never says it couldn't be removed, and on
     JSON.stringify({
       apps: {
         "origaitv.steam": { state: "failed", error: "Couldn't install Steam. Update your TV in Settings, under Updates, then try again." },
-        "origaitv.retroarch": { state: "failed", error: "Couldn't install RetroArch. Update your TV in Settings, under Updates, then try again." },
+        "origaitv.retroarch": { state: "failed", error: "Couldn't install RetroArch. Update your TV in Settings, under Updates, then try again.", reason: "update" },
         "origaitv.moonlight": { state: "installed", error: "Couldn't remove it" },
       },
     }),
@@ -348,6 +348,9 @@ test("a game whose install didn't work never says it couldn't be removed, and on
   assert.equal(line("origaitv.retroarch").state, "failed");
   assert.match(line("origaitv.retroarch").error ?? "", /^Couldn't install RetroArch\. Update your TV/);
   assert.equal(line("origaitv.moonlight").error, "Couldn't remove it");
+  // Setup hears why as the install's word, and only a word it knows.
+  assert.equal(apps.status()["origaitv.retroarch"].reason, "update");
+  assert.equal(apps.status()["origaitv.steam"].reason, undefined);
 });
 
 test("a line root left going when it stopped, or going for longer than one install may take, shows as not done", async () => {

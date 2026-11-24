@@ -75,6 +75,7 @@ echo "$1" >>"${0%/*}/programs"
 if [[ $1 == origaitv.broken ]]; then
   mkdir -p "$ORIGAITV_APP_PACKAGE_ERRORS"
   echo "broken-game didn't install" >"$ORIGAITV_APP_PACKAGE_ERRORS/$1.error"
+  echo update >"$ORIGAITV_APP_PACKAGE_ERRORS/$1.reason"
   exit 1
 fi
 STUB
@@ -95,7 +96,7 @@ printf '%s' '{"apps":["origaitv.game","origaitv.broken","origaitv.shell","someon
 PATH="$SCRATCH/bin:$PATH" run || fail "it goes through apps with programs" "$(cat "$SCRATCH/out")"
 [[ $(cat "$SCRATCH/programs") == $'origaitv.game\norigaitv.broken\norigaitv.shell' ]] || fail "every official native app goes through its program's step, which installs only what's missing" "$(cat "$SCRATCH/programs")"
 jq -e '.apps["origaitv.game"].state == "installed" and .apps["origaitv.shell"].state == "installed" and .apps["someone.game"].state == "installed" and .apps["origaitv.web"].state == "installed"' "$ORIGAITV_SETUP_APPS_STATUS" >/dev/null || fail "an app is installed once its program is" "$(cat "$ORIGAITV_SETUP_APPS_STATUS")"
-jq -e '.apps["origaitv.broken"] | .state == "failed" and .error == "broken-game didn'"'"'t install"' "$ORIGAITV_SETUP_APPS_STATUS" >/dev/null || fail "and failed, with why, when its program didn't install" "$(cat "$ORIGAITV_SETUP_APPS_STATUS")"
+jq -e '.apps["origaitv.broken"] | .state == "failed" and .error == "broken-game didn'"'"'t install" and .reason == "update"' "$ORIGAITV_SETUP_APPS_STATUS" >/dev/null || fail "and failed, with why and its reason, when its program didn't install" "$(cat "$ORIGAITV_SETUP_APPS_STATUS")"
 grep -qx "TimeoutStartSec=infinity" "$ROOT/system/origaitv-setup-apps.service" || fail "origaitv-setup-apps.service waits as long as a queue of programs takes"
 grep -qx "TimeoutStartSec=60min" "$ROOT/system/origaitv-app-package@.service" || fail "and each program has a limit of its own"
 pass "ADR-042 an official native app's program comes with it, and its tile says when it didn't"

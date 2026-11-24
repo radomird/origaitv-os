@@ -142,6 +142,7 @@ if package origaitv.later; then
 fi
 [[ $(cat "$calls") == "pacman -Sy --noconfirm" ]] || fail "and only tried the lists" "$(cat "$calls")"
 [[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error") == "Couldn't download it. Check your internet, then try again." ]] || fail "and says why" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error")"
+[[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.reason") == "offline" ]] || fail "and why as a word, for the TV's own words" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.reason" 2>&1)"
 rm "$SCRATCH/offline"
 pass "a box that can't fetch its package lists says to check the internet"
 
@@ -155,6 +156,7 @@ fi
 [[ $(cat "$calls") == "pacman -Sy --noconfirm" ]] || fail "past fetching the lists" "$(cat "$calls")"
 grep -q "bash would be upgraded on its own" "$SCRATCH/out" || fail "and the journal says which" "$(cat "$SCRATCH/out")"
 [[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error") == "Couldn't install it. Update your TV in Settings, under Updates, then try again." ]] || fail "and says to update" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error")"
+[[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.reason") == "update" ]] || fail "and why as a word" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.reason" 2>&1)"
 refused origaitv.later "Couldn't install it. Update your TV in Settings, under Updates, then try again."
 rm "$SCRATCH/upgrades"
 echo new-library >"$SCRATCH/upgrades"
