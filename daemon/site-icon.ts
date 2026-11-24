@@ -7,7 +7,7 @@
 export const ICON_MAX = 512 * 1024;
 const PAGE_MAX = 2 * 1024 * 1024;
 const TIMEOUT_MS = 10_000;
-const TYPES = /^image\/(png|jpeg|webp|gif|avif|svg\+xml|x-icon|vnd\.microsoft\.icon)$/;
+export const ICON_TYPES = /^image\/(png|jpeg|webp|gif|avif|svg\+xml|x-icon|vnd\.microsoft\.icon)$/;
 
 // The value of an attribute in one tag, or null.
 function attribute(tag: string, name: string): string | null {
@@ -116,8 +116,8 @@ export async function siteIcon(home: string, options: SiteIconOptions): Promise<
       }
       let type = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
       // Many servers send a favicon.ico as anything at all.
-      if (!TYPES.test(type) && url.pathname.endsWith(".ico")) type = "image/x-icon";
-      if (!TYPES.test(type)) {
+      if (!ICON_TYPES.test(type) && url.pathname.endsWith(".ico")) type = "image/x-icon";
+      if (!ICON_TYPES.test(type)) {
         why(`${url.href} is ${type || "of no type"}, not an image`);
         continue;
       }
