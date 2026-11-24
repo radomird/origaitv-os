@@ -382,7 +382,11 @@ export class SetupApps {
         // A line from an install that's over says nothing more than whether
         // it's here, unless it didn't work.
         const state = now && (GOING.includes(now.state) || (now.state === "failed" && !installed)) ? now.state : null;
-        return { id: entry.id, name: entry.name, description: entry.description ?? "", installed, state, ...(now?.error && (state || installed) ? { error: now.error } : {}) };
+        // Why, for an install that didn't work, or for a removal that
+        // didn't: root leaves that one installed, with why. A game whose
+        // install didn't work never says it couldn't be removed.
+        const why = (state === "failed" || (installed && now?.state === "installed")) && now?.error ? { error: now.error } : {};
+        return { id: entry.id, name: entry.name, description: entry.description ?? "", installed, state, ...why };
       })
       .sort((a, b) => Number(b.id === SUGGESTED_GAME) - Number(a.id === SUGGESTED_GAME) || a.name.localeCompare(b.name));
     return { apps: list, ...(error ? { error } : {}) };

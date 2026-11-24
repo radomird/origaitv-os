@@ -470,6 +470,15 @@ export function settings(ctx: Ctx, open?: string): View {
   };
 
   const version = () => ctx.state.version.replace(/\.r\d+\.g[0-9a-f]+$/, "");
+  // What this TV runs (ADR-132): its release (OrigaiTV 1.0.0-rc4), or once
+  // an update on edge has moved it past the ISO's build, the release it was
+  // installed from, never just edge. With neither, its build's own version.
+  // An edge build says where it was made (0.2.0.r1061.g91b63a2e0), and that
+  // goes on a line of its own, under it.
+  const release = () => ctx.state.release ?? version();
+  const runs = () =>
+    ctx.state.release ? `OrigaiTV ${ctx.state.release}` : ctx.state.installedFrom ? `Edge channel, installed from ${ctx.state.installedFrom}` : `OrigaiTV ${version()}`;
+  const build = (): string | null => (ctx.state.version !== "dev" && ctx.state.version !== release() ? ctx.state.version : null);
   // Whether the theme's background is light, so About shows the logo that
   // reads on it. A colour it can't read counts as dark, like most themes.
   const lightBackground = (): boolean => {
@@ -483,7 +492,8 @@ export function settings(ctx: Ctx, open?: string): View {
     aboutBox(ctx),
     // The look's own logo, with the name and version under it in words.
     h("img", { class: "about-logo", src: logoFor(lookId(), lightBackground()), alt: "" }),
-    h("div", { class: "panel-big" }, `OrigaiTV ${ctx.state.version}`),
+    h("div", { class: "panel-big" }, runs()),
+    ...(build() ? [h("p", { class: "panel-note", "data-row": "build" }, `Build ${build()}`)] : []),
     note("The world's first open-source agentic TV OS. Powered by Omarchy."),
     note("Omarchy is made by David Heinemeier Hansson and its contributors, under the MIT licence."),
     note("Weather data from MET Norway, under CC BY 4.0."),
@@ -585,7 +595,8 @@ export function settings(ctx: Ctx, open?: string): View {
         // Restart, Shut down and sleep (ADR-033) are an adult's.
         adult ? row("power", "Power", "", () => openPage("power")) : null,
         h("button", { class: "button", "data-focus": true, "data-action": "desktop", onclick: () => openPage("desktop") }, "Omarchy's desktop"),
-        row("about", "About", `OrigaiTV ${version()}`, () => openPage("about")),
+        row("about", "About", runs(), () => openPage("about")),
+        build() ? plain("Build", build()!, "build") : null,
       ],
     },
   ];

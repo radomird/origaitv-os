@@ -38,7 +38,7 @@ export function appSetup(ctx: Ctx, id: string): View {
   const offerFound = (found: AppSetup) => {
     const address = found.fields.find((field) => field.address);
     if (!address) return;
-    const typed = h("button", { class: "button found-typed", "data-focus": true, "data-action": "type-address", onclick: () => showForm(address.key) }, "Type its address");
+    const typed = h("button", { class: "button found-typed", "data-focus": true, "data-action": "type-address", onclick: () => showForm(address.key) }, "Enter the address manually");
     const list = foundList({
       kinds: kindsFor(id),
       focus: ctx.focus,

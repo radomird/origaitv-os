@@ -25,10 +25,42 @@ echo "$name \$*" >>"$calls"
 [[ $name != omarchy-pkg-add ]] || [[ \$1 != broken-game ]]
 STUB
 done
+# -Sy fetches the package lists, unless $SCRATCH/offline says the box isn't
+# online, and -Sp names what an install would bring: the packages asked for,
+# and what $SCRATCH/upgrades says their lists want upgraded with them.
 cat >"$OMARCHY_PATH/bin/pacman" <<STUB
 #!/bin/bash
-grep -qx -- "\${3:-\$2}" "$SCRATCH/installed" 2>/dev/null
+case \$1 in
+  -Sy)
+    echo "pacman \$*" >>"$calls"
+    [[ ! -e $SCRATCH/offline ]] || exit 1
+    touch "\$ORIGAITV_PACMAN_SYNC/core.db" "\$ORIGAITV_PACMAN_SYNC/extra.db" "\$ORIGAITV_PACMAN_SYNC/multilib.db"
+    ;;
+  -Sp)
+    shift 5
+    # Each package asked for at 1.0-1, unless $SCRATCH/upgrades has its version.
+    for one; do
+      grep -q "^\$one " "$SCRATCH/upgrades" 2>/dev/null || echo "\$one 1.0-1"
+    done
+    [[ ! -s $SCRATCH/upgrades ]] || cat "$SCRATCH/upgrades"
+    ;;
+  *)
+    # A line in $SCRATCH/installed is a name, or a name and its version.
+    line=\$(awk -v name="\${3:-\$2}" '\$1 == name' "$SCRATCH/installed" 2>/dev/null)
+    [[ -n \$line ]] || exit 1
+    if [[ \$line == *" "* ]]; then echo "\$line"; else echo "\$line 1.0-1"; fi
+    ;;
+esac
 STUB
+# What the box's graphics are, for the 32-bit drivers: $SCRATCH/lspci, on
+# an x86 box with no NVIDIA card.
+cat >"$OMARCHY_PATH/bin/lspci" <<STUB
+#!/bin/bash
+cat "$SCRATCH/lspci" 2>/dev/null
+STUB
+printf '#!/bin/bash\nexit 0\n' >"$OMARCHY_PATH/bin/omarchy-hw-x86"
+printf '#!/bin/bash\nexit 1\n' >"$OMARCHY_PATH/bin/omarchy-hw-nvidia-gsp"
+printf '#!/bin/bash\nexit 1\n' >"$OMARCHY_PATH/bin/omarchy-hw-nvidia-without-gsp"
 # The box's repositories, each with its package list.
 cat >"$OMARCHY_PATH/bin/pacman-conf" <<'STUB'
 #!/bin/bash
@@ -91,12 +123,72 @@ app origaitv.flat official "$(native flatpak org.example.Game)"
 refused origaitv.flat "Can't install this kind of app yet"
 pass "only an official native app names a package, by a package name, and a refusal says why"
 
-# A box that hasn't fetched its package lists yet says to update it first.
+# A box straight from the ISO has no package lists: it fetches them, and
+# then installs, since nothing on it is older than they are.
 rm "$ORIGAITV_PACMAN_SYNC/multilib.db"
 app origaitv.later official "$(native pacman later-game)"
-refused origaitv.later "Update OrigaiTV in Settings first, then add the app again"
-touch "$ORIGAITV_PACMAN_SYNC/multilib.db"
-pass "a box without its package lists says to update it, and fetches none on the side"
+package origaitv.later || fail "a box without its package lists still installs" "$(cat "$SCRATCH/out")"
+[[ $(cat "$calls") == $'pacman -Sy --noconfirm\nomarchy-pkg-add later-game' ]] || fail "after fetching the lists" "$(cat "$calls")"
+[[ -f $ORIGAITV_PACMAN_SYNC/multilib.db ]] || fail "which are on the box after"
+package origaitv.later || fail "again" "$(cat "$SCRATCH/out")"
+! grep -q "pacman -Sy" "$calls" || fail "a box with its lists doesn't fetch them again" "$(cat "$calls")"
+pass "a box straight from the ISO fetches its package lists, then installs the program"
+
+# Offline, it says so for the TV.
+rm "$ORIGAITV_PACMAN_SYNC/multilib.db"
+touch "$SCRATCH/offline"
+if package origaitv.later; then
+  fail "a box that can't fetch its lists installs nothing" "$(cat "$SCRATCH/out")"
+fi
+[[ $(cat "$calls") == "pacman -Sy --noconfirm" ]] || fail "and only tried the lists" "$(cat "$calls")"
+[[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error") == "Couldn't download it. Check your internet, then try again." ]] || fail "and says why" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error")"
+rm "$SCRATCH/offline"
+pass "a box that can't fetch its package lists says to check the internet"
+
+# Lists newer than the system: a program that needs nothing upgraded still
+# installs, and one that would upgrade a package the box has doesn't, since
+# that's half an update.
+echo bash >"$SCRATCH/upgrades"
+if package origaitv.later; then
+  fail "a box older than the lists it just fetched installs nothing" "$(cat "$SCRATCH/out")"
+fi
+[[ $(cat "$calls") == "pacman -Sy --noconfirm" ]] || fail "past fetching the lists" "$(cat "$calls")"
+grep -q "bash would be upgraded on its own" "$SCRATCH/out" || fail "and the journal says which" "$(cat "$SCRATCH/out")"
+[[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error") == "Couldn't install it. Update your TV in Settings, under Updates, then try again." ]] || fail "and says to update" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.later.error")"
+refused origaitv.later "Couldn't install it. Update your TV in Settings, under Updates, then try again."
+rm "$SCRATCH/upgrades"
+echo new-library >"$SCRATCH/upgrades"
+package origaitv.later || fail "a program whose packages are all new installs" "$(cat "$SCRATCH/out")"
+[[ $(cat "$calls") == "omarchy-pkg-add later-game" ]] || fail "as before" "$(cat "$calls")"
+rm "$SCRATCH/upgrades"
+pass "never half an update: a program that would upgrade a package the box has says to update first"
+
+# Steam's 32-bit drivers are in the same look, and each 32-bit library has
+# to be the release of the 64-bit one the box has: Steam's games load both.
+echo "00:02.0 VGA compatible controller: Intel Corporation UHD Graphics 620" >"$SCRATCH/lspci"
+echo "mesa 1:25.2.6-1" >>"$SCRATCH/installed"
+echo "lib32-mesa 1:25.2.7-1" >"$SCRATCH/upgrades"
+app origaitv.newsteam official "$(native pacman steam-stand-in)"
+cp "$ORIGAITV_APPS/origaitv.newsteam/manifest.json" "$SCRATCH/m" && jq '.tv.package.pacman = "steam"' "$SCRATCH/m" >"$ORIGAITV_APPS/origaitv.newsteam/manifest.json"
+if package origaitv.newsteam; then
+  fail "Steam with a 32-bit Mesa newer than the box's Mesa installs nothing" "$(cat "$SCRATCH/out")"
+fi
+[[ ! -e $calls ]] || fail "not even the drivers" "$(cat "$calls")"
+grep -q "lib32-mesa 1:25.2.7-1 wouldn't match mesa 1:25.2.6-1" "$SCRATCH/out" || fail "and the journal says which" "$(cat "$SCRATCH/out")"
+[[ $(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.newsteam.error") == "Couldn't install it. Update your TV in Settings, under Updates, then try again." ]] || fail "and the TV says to update" "$(cat "$ORIGAITV_APP_PACKAGE_ERRORS/origaitv.newsteam.error")"
+# The same release with another build number matches.
+echo "lib32-mesa 1:25.2.6-2" >"$SCRATCH/upgrades"
+package origaitv.newsteam || fail "Steam with a matching 32-bit Mesa installs" "$(cat "$SCRATCH/out")"
+[[ $(cat "$calls") == $'omarchy-install-gaming-gpu-lib32 \nomarchy-pkg-add steam' ]] || fail "the drivers, then Steam" "$(cat "$calls")"
+# The driver this box's graphics take is looked at too, before it's in.
+echo "lib32-vulkan-intel 1:25.2.7-1" >"$SCRATCH/upgrades"
+echo "vulkan-intel 1:25.2.6-1" >>"$SCRATCH/installed"
+if package origaitv.newsteam; then
+  fail "a 32-bit Vulkan driver that doesn't match the box's installs nothing" "$(cat "$SCRATCH/out")"
+fi
+grep -q "lib32-vulkan-intel 1:25.2.7-1 wouldn't match vulkan-intel 1:25.2.6-1" "$SCRATCH/out" || fail "and says which" "$(cat "$SCRATCH/out")"
+rm -f "$SCRATCH/upgrades" "$SCRATCH/lspci"
+pass "Steam's 32-bit drivers and libraries install only at the release of the 64-bit ones the box has"
 
 app origaitv.broken official '{"name":"Broken Game","tv":{"runtime":"native","package":{"pacman":"broken-game"},"exec":["broken-game"]}}'
 if package origaitv.broken; then
