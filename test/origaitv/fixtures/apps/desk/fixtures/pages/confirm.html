@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Confirm</title>
+<style>
+  * { outline: none; }
+  body { margin: 0; background: #111; color: #eee; font: 20px sans-serif; }
+  nav { display: flex; gap: 48px; padding: 32px 48px; }
+  #step { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 10; display: flex; flex-direction: column; gap: 24px; width: 640px; padding: 48px; background: #222; }
+  #step button { font: inherit; height: 64px; }
+  #step .quiet { border: 0; background: none; color: #9cf; text-decoration: underline; cursor: pointer; }
+</style>
+</head>
+<body>
+<!--
+  A sign-in step the way some sites add one after the email: a dialog that
+  says aria-modal, in the middle, with no backdrop, so the page's own links
+  still show round it. The arrows keep to the dialog. Its second choice is
+  a plain link-looking span that only shows a pointer.
+-->
+<nav>
+  <a id="home" href="next.html?home">Home</a>
+  <a id="about" href="next.html?about">About</a>
+</nav>
+<div id="step" role="dialog" aria-modal="true" aria-label="Confirm it's you">
+  <p>We need to confirm it's you.</p>
+  <button id="send" type="button">Send email</button>
+  <span id="password" class="quiet">Use a password instead</span>
+</div>
+<script>
+  document.getElementById("send").addEventListener("click", () => (document.title = "sent"));
+  document.getElementById("password").addEventListener("click", () => (document.title = "password"));
+</script>
+</body>
+</html>
