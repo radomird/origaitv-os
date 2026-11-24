@@ -503,6 +503,10 @@ export function settings(ctx: Ctx, open?: string): View {
     // TMDB's own notice, as they word it, in every look.
     h("p", { class: "panel-note", "data-own-case": true }, TMDB_NOTICE),
     note("Where to watch is from JustWatch, through TMDB."),
+    // The logos the official apps bring (ADR-135): their owners' marks, and
+    // where the files came from, as the apps' README credits them.
+    note("App logos belong to their owners, and only show which app is which."),
+    note("Many come from the selfh.st icons, under CC BY 4.0, and from Simple Icons."),
   ];
 
   // The eight sections (D10). A child's profile has no AI and no Network,
