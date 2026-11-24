@@ -63,6 +63,7 @@ export interface SetupApp {
   installed: boolean;
   state: InstallState | null;
   error?: string;
+  reason?: AppReason;
 }
 
 // Apps → add an app (ADR-042): an official app that isn't on the TV, or one
@@ -98,8 +99,15 @@ export interface Present {
 interface Status {
   state: InstallState;
   error?: string;
+  // Why it didn't install, as a word the TV says its own way.
+  reason?: AppReason;
   at?: string;
 }
+
+// Why an app's program didn't install (bin/origaitv-app-package): the TV was
+// offline, or it needs updating first.
+export const APP_REASONS = ["offline", "update"] as const;
+export type AppReason = (typeof APP_REASONS)[number];
 
 // The Xbox controller driver (ADR-103): whether it's in, and how its
 // install is going.
@@ -268,7 +276,8 @@ export class SetupApps {
           found[id] = app.state === "removing" ? { state: "installed", error: "Couldn't remove it", ...at } : { state: "failed", error: "Couldn't install it. Try again.", ...at };
           continue;
         }
-        found[id] = { state: app.state as InstallState, ...(typeof app.error === "string" ? { error: app.error.slice(0, 200) } : {}), ...at };
+        const reason = APP_REASONS.includes(app.reason as AppReason) ? { reason: app.reason as AppReason } : {};
+        found[id] = { state: app.state as InstallState, ...(typeof app.error === "string" ? { error: app.error.slice(0, 200) } : {}), ...reason, ...at };
       }
     } catch {
       // nothing installed from setup yet
@@ -337,6 +346,7 @@ export class SetupApps {
         installed: here.has(entry.id),
         state: now?.state ?? null,
         ...(now?.error ? { error: now.error } : {}),
+        ...(now?.reason ? { reason: now.reason } : {}),
       });
     }
     const byName = (a: SetupApp, b: SetupApp) => a.name.localeCompare(b.name);
