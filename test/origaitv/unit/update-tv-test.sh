@@ -503,12 +503,63 @@ pass "an update that fails after the packages went in says it stopped halfway"
 # One whose new kernel went in before a later step failed: the running
 # kernel's modules are gone, so the update says the box needs a restart all
 # the same, and leaves the restart to the person, since it failed.
+# Here an update of the system's packages alone: OrigaiTV's and Omarchy's
+# versions don't change, and it still says it stopped halfway, not that
+# nothing changed.
+touch "$SCRATCH/omarchy-only"
 ORIGAITV_MODULES_DIR="$SCRATCH/new-kernel" update && fail "an update whose migrations fail after a new kernel says so"
-[[ $(jq -c '[.state, .reason, .restart]' "$progress") == '["failed","halfway",true]' ]] ||
-  fail "a failed update after a new kernel says the box needs a restart" "$(cat "$progress")"
+[[ $(jq -c '[.state, .detail, .reason, .restart]' "$progress") == '["failed","the update stopped halfway","halfway",true]' ]] ||
+  fail "a failed update after a new kernel says it stopped halfway and the box needs a restart" "$(cat "$progress")"
 ! grep -q "^systemctl reboot" "$calls" || fail "a failed update doesn't restart the box by itself" "$(cat "$calls")"
-rm "$SCRATCH/fail/omarchy-migrate"
-pass "a failed update after a new kernel went in says the box needs a restart"
+rm "$SCRATCH/fail/omarchy-migrate" "$SCRATCH/omarchy-only"
+pass "a failed update after a new kernel went in says it stopped halfway and the box needs a restart"
+
+# Why is read from the step that failed: a flatpak that couldn't connect,
+# which doesn't stop the update, doesn't make a later failure "offline".
+stub flatpak
+stub omarchy-update-orphan-pkgs "echo 'error: failed to connect to flathub' >&2; exit 0"
+touch "$SCRATCH/fail/omarchy-migrate"
+cat >"$SCRATCH/bin/flatpak" <<SH
+#!/bin/bash
+echo "flatpak \$*" >>"$calls"
+echo "error: Unable to load summary from remote flathub: failed to connect" >&2
+exit 1
+SH
+chmod +x "$SCRATCH/bin/flatpak"
+update && fail "an update whose migrations fail says so"
+[[ $(jq -r .reason "$progress") == "halfway" ]] || fail "a flatpak that couldn't connect earlier doesn't make it offline" "$(cat "$progress")"
+rm "$SCRATCH/fail/omarchy-migrate" "$SCRATCH/bin/flatpak"
+stub omarchy-update-orphan-pkgs
+pass "a failed update's reason comes from the step that failed"
+
+# tested.json that can't be fetched is no network, not an update that isn't
+# tested yet.
+mv "$SCRATCH/tested/tested.json" "$SCRATCH/tested.json.away"
+update && fail "an update without tested.json says so"
+[[ $(jq -c '[.detail, .reason]' "$progress") == '["not tested yet","offline"]' ]] || fail "tested.json that couldn't be fetched says offline" "$(cat "$progress" "$ORIGAITV_UPDATE_STATE/update.log")"
+mv "$SCRATCH/tested.json.away" "$SCRATCH/tested/tested.json"
+pass "tested.json that can't be fetched gives no network as the reason"
+
+# A long download says nothing, and the update's progress still says it's
+# going, every minute (here every second), so the TV doesn't call it
+# stopped. Once it's over, nothing writes the progress any more, and the
+# update's lock is let go.
+stub omarchy-update-system-pkgs "touch '$SCRATCH/upgraded'
+jq -r .at '$progress' >'$SCRATCH/at-before'
+command -p sleep 3
+jq -r .at '$progress' >'$SCRATCH/at-after'"
+ORIGAITV_UPDATE_BEAT=1 update || fail "an update with a long quiet download goes through" "$(cat "$SCRATCH/out")"
+[[ -s $SCRATCH/at-before && $(cat "$SCRATCH/at-before") != "$(cat "$SCRATCH/at-after")" ]] ||
+  fail "the progress is written again while the download says nothing" "$(cat "$SCRATCH/at-before" "$SCRATCH/at-after" 2>&1)"
+cp "$progress" "$SCRATCH/progress-done"
+sleep 2
+cmp -s "$progress" "$SCRATCH/progress-done" || fail "nothing writes the progress once the update's over" "$(cat "$progress")"
+flock -n "$runtime/omarchy-update.lock" true || fail "the update's lock is let go with the heartbeat gone"
+stub omarchy-update-system-pkgs "touch '$SCRATCH/upgraded'
+echo ':: Synchronizing package databases...'
+echo '(1/4) upgrading origaitv'
+echo '(4/4) upgrading omarchy'"
+pass "a long download that says nothing still gives the TV news every minute"
 
 # The box stays awake for it, as it did under Omarchy's own update.
 grep -qx 'ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle --who=OrigaiTV "--why=installing an update" --mode=block /usr/bin/origaitv-update-tv' "$ROOT/system/origaitv-update-tv.service" ||
