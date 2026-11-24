@@ -214,6 +214,10 @@ export interface DaemonOptions {
   country?: { zone?: () => Promise<string>; waitMs?: number };
   // How long the listening bar waits for new words before it goes (20 s).
   listenIdleMs?: number;
+  // How often the builds are looked at after the first look, which is as the
+  // daemon starts: every two seconds. A test can space them out, so a page
+  // has time to open before the first of them on a busy machine.
+  buildsEveryMs?: number;
   // How often what's playing is read again while something plays (10 s).
   playingLookMs?: number;
   // Servers and shares on the home network: stand-ins' ports, for tests.
@@ -727,9 +731,9 @@ export class Daemon {
 
   listen(): Promise<number> {
     // The builds, looked at once now, before any page or phone can ask, and
-    // then every two seconds: the TV and the phones hear when one moves on.
+    // then every two seconds (buildsEveryMs): the TV and the phones hear when one moves on.
     this.buildsLooked ??= this.firstBuildsLook();
-    this.buildsTimer = setInterval(() => void this.watchBuilds(), 2000);
+    this.buildsTimer = setInterval(() => void this.watchBuilds(), this.options.buildsEveryMs ?? 2000);
     this.buildsTimer.unref();
     void this.fetchAiCli("the daemon started");
     const lan = this.lan;
