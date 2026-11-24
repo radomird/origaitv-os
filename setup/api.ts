@@ -11,7 +11,7 @@ export type Step = "welcome" | "ready" | "box" | "country" | "ai" | "people" | "
 export type Goal = "streaming" | "music" | "media" | "gaming";
 export type UpdateFirst = "checking" | "installing" | "done" | "none" | "failed" | "skipped";
 // Why the update at getting ready didn't go ahead (daemon/setup.ts).
-export type UpdateWhy = "offline" | "busy" | "untested" | "space" | "mirror" | "halfway" | "unchanged" | "stalled" | "check" | "start" | "waiting";
+export type UpdateWhy = "offline" | "busy" | "untested" | "space" | "mirror" | "halfway" | "unchanged" | "stalled" | "cut" | "check" | "start" | "waiting";
 
 export interface SetupState {
   done: boolean;

@@ -42,6 +42,7 @@ const WHY: Record<UpdateWhy, [line: string, bar: string]> = {
   halfway: ["The update stopped partway. Try again in Settings.", "Update stopped partway"],
   unchanged: ["Couldn't update. Try later in Settings.", "Couldn't update"],
   stalled: ["The update stopped answering. Try again in Settings.", "Update stopped answering"],
+  cut: ["The update was cut off by a restart. Try again in Settings.", "Update cut off"],
   check: ["Couldn't check for updates. Try later in Settings.", "Couldn't check for updates"],
   start: ["Couldn't start the update. Try later in Settings.", "Couldn't start the update"],
   waiting: ["Your TV is up to date for now. Newer updates come later.", "Some updates aren't ready yet"],
@@ -302,8 +303,12 @@ export function ready(ctx: Ctx, phase2 = false): View {
         else if (now?.state === "failed") about.setup = await setup.ready({ update: "failed", why: reason(now) });
         else if (now?.state === "done") about.setup = await setup.ready({ update: "done" });
         else if (now?.state === "restarting" && restarted(about)) about.setup = await setup.ready({ update: "done" });
+        // The TV started again in the middle of it, as after a power cut:
+        // the update isn't running any more, so there's nothing to wait for.
+        else if (restarted(about)) about.setup = await setup.ready({ update: "failed", why: "cut" });
         // No news for as long as the daemon gives an install: the update
-        // never started, or stopped without saying so.
+        // never started, or stopped without saying so. A running update says
+        // so every minute, however long its download.
         else if (performance.now() - heard > STALL_MS) about.setup = await setup.ready({ update: "failed", why: "stalled" });
       }
       ctx.info = about;

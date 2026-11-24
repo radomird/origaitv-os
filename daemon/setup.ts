@@ -96,10 +96,10 @@ export type UpdateFirst = (typeof UPDATES)[number];
 // Why the update didn't go ahead, for the words on screen: the box was
 // offline, another update was running, the nightly run hadn't passed it yet,
 // the disk was full, the mirror had moved on, it stopped halfway or changed
-// nothing, it stopped giving news, or the check or the update wouldn't
-// start. "waiting" is the nightly run's hold found by the check, which
+// nothing, it stopped giving news or was cut off by a restart, or the check
+// or the update wouldn't start. "waiting" is the nightly run's hold found by the check, which
 // setup carries on past without installing.
-export const WHYS = ["offline", "busy", "untested", "space", "mirror", "halfway", "unchanged", "stalled", "check", "start", "waiting"] as const;
+export const WHYS = ["offline", "busy", "untested", "space", "mirror", "halfway", "unchanged", "stalled", "cut", "check", "start", "waiting"] as const;
 export type Why = (typeof WHYS)[number];
 
 export interface Ready {

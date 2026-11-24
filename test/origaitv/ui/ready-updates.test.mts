@@ -177,6 +177,55 @@ test("an update that stops giving news counts as failed after 15 minutes, says s
   }
 });
 
+test("a long download that says nothing still counts as news: the update's progress written again every minute keeps setup waiting past 15 minutes", async () => {
+  atReady();
+  const page = await tv(new Date());
+  try {
+    await asked(page, "update-check");
+    await systemUpdates();
+    await asked(page, "update-install");
+    // The download is under way at 40, and says nothing more for 20
+    // minutes. Only its heartbeat writes the progress again, every few
+    // minutes here.
+    for (let minute = 0; minute < 20; minute += 5) {
+      progress("running", "packages", 40);
+      await page.waitForTimeout(1500);
+      await page.clock.fastForward("05:00");
+    }
+    await page.waitForTimeout(1500);
+    assert.equal((await step()).ready.update, "installing", "still updating after 20 minutes with a heartbeat");
+    assert.equal(await line(page), "Updating your TV. It can take a few minutes and restart once.");
+  } finally {
+    await page.close();
+  }
+});
+
+test("an update cut off by a restart, as after a power cut, says so as soon as the TV is back", async () => {
+  atReady();
+  let page = await tv();
+  try {
+    await asked(page, "update-check");
+    await systemUpdates();
+    await asked(page, "update-install");
+    progress("running", "packages", 40);
+    await page.waitForFunction(() => document.querySelector(".blocks")?.getAttribute("aria-label") === "40 percent");
+  } finally {
+    await page.close();
+  }
+  // The power goes, and the TV starts again on another boot, with the
+  // update's progress still saying it was running.
+  boot = BOOTS[1];
+  page = await tv();
+  try {
+    await says(page, "The update was cut off by a restart. Try again in Settings.");
+    assert.match((await bar(page)) ?? "", /^Update cut off/);
+    assert.equal((await step()).ready.why, "cut");
+    await movesOn(page);
+  } finally {
+    await page.close();
+  }
+});
+
 test("an update that failed says why, on the line and in the bar, and setup carries on", async () => {
   atReady();
   const page = await tv();
