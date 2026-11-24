@@ -565,6 +565,7 @@ Unless a row says otherwise, a body is sealed JSON and an answer is sealed JSON 
 | `POST /api/phone/settings` | None | `{ok}`. Opens Settings on the TV. | Adult |
 | `POST /api/phone/viewer` | `{id}`: a profile's id | `{ok, viewer}`. `404`. | Anyone. Grant to switch from a child's profile to an adult's, or to a locked profile. |
 | `POST /api/phone/sign-in` | `{username, password}`, up to 200 characters each | `{ok}`. `409` when nothing is signing in on the TV. `503`. | Anyone |
+| `POST /api/phone/signed-in` | None | `{ok}`. "I'm signed in": the TV asks the app now, and says on screen what it found. It asks every 2 seconds anyway, and moves on by itself once the app says it's signed in. `409` when nothing is signing in on the TV. `503`. | Anyone |
 
 What `POST /api/phone/remote` takes, one per request:
 
@@ -863,7 +864,7 @@ A few things to know:
 | `viewer` | Who's watching: `{id, name, role, avatar, locked}`. `role` is `"adult"` or `"child"`. `avatar` is a colour's name. `locked` means the profile asks for the PIN to open. |
 | `viewers` | Every profile, each in the same shape. |
 | `pin` | `{set, locked}`: whether there's a PIN, and whether the TV is locked now. |
-| `signIn` | `{name}` while an app's sign-in screen is up on the TV, for `POST /api/phone/sign-in`. Otherwise `null`. |
+| `signIn` | `{name}` while an app's sign-in is up on the TV, for `POST /api/phone/sign-in` and `POST /api/phone/signed-in`. The TV shows only the service's page then, so the phone is where "I'm signed in" is. Otherwise `null`. |
 | `update` | An update that's ready or going in: `{version, installed, omarchy, notes, tonight, later, installing}`. `null` with nothing to install. |
 | `tv` | What's on the TV. See below. |
 | `nowPlaying` | `{title, app, left}` for the remote's card, while the `remote2` switch is on, something plays and its app has said where it is in the last 30 seconds. `left` is minutes, and may be missing. Otherwise `null`, which it can be while `tv.playing` is `true`. See [`nowPlaying`](#nowplaying). With the `playing2` switch on it says more, and it stays while the thing is paused. See [What's playing](#whats-playing). |
