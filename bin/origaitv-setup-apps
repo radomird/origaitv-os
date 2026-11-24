@@ -56,9 +56,11 @@ write() {
   mv -f "$next" "$STATUS"
 }
 
-# set_state <id> <state> [why]: one app's line in the status file.
+# set_state <id> <state> [why] [reason]: one app's line in the status file,
+# with why as the TV's words and as a word the TV can say its own way.
 set_state() {
-  write '.apps[$id] = ({state: $state, at: $at} + (if $error == "" then {} else {error: $error} end))' --arg id "$1" --arg state "$2" --arg error "${3:-}"
+  write '.apps[$id] = ({state: $state, at: $at} + (if $error == "" then {} else {error: $error} end) + (if $reason == "" then {} else {reason: $reason} end))' \
+    --arg id "$1" --arg state "$2" --arg error "${3:-}" --arg reason "${4:-}"
 }
 
 # driver_state <state> [why] [restart]: the Xbox controller driver's line.
@@ -91,7 +93,7 @@ install_program() {
 
 # install_app <id>
 install_app() {
-  local id=$1 out why status=0 here=0
+  local id=$1 out why reason status=0 here=0
   # On the TV already, as an app that's being added again.
   official "$id" && here=1
   set_state "$id" installing
@@ -103,6 +105,7 @@ install_app() {
       if ! install_program "$id"; then
         why=$(head -n 1 "$PACKAGE_ERRORS/$id.error" 2>/dev/null | cut -c1-200 || true)
         [[ -n $why ]] || why="Couldn't install it"
+        reason=$(head -n 1 "$PACKAGE_ERRORS/$id.reason" 2>/dev/null | grep -xE '[a-z]{1,20}' || true)
         # Without its program the app opens nothing, so one this install
         # brought goes again: the TV shows what's really on it, and it can
         # be added again from Settings. One that was here before stays.
@@ -110,7 +113,7 @@ install_app() {
           timeout --kill-after=1m "$REMOVE_LIMIT" "$REMOVE" "$id" >/dev/null 2>&1 ||
             echo "origaitv-setup-apps: $id stays without its program" >&2
         fi
-        set_state "$id" failed "$why"
+        set_state "$id" failed "$why" "$reason"
         echo "origaitv-setup-apps: the program $id opens didn't install: $why" >&2
         return
       fi

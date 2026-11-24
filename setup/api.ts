@@ -126,7 +126,10 @@ export interface AiInfo {
 // Setup's apps (board 09): the official apps, the goal's first, the built-in
 // ones beside them, and how each install the TV asked for is going.
 export type InstallState = "queued" | "installing" | "installed" | "failed";
-export type Installs = Record<string, { state: InstallState; error?: string }>;
+// Why an app's program didn't install, as a word: the TV was offline, or it
+// needs updating first.
+export type AppReason = "offline" | "update";
+export type Installs = Record<string, { state: InstallState; error?: string; reason?: AppReason }>;
 
 export interface SetupApp {
   id: string;
@@ -136,6 +139,7 @@ export interface SetupApp {
   installed: boolean;
   state: InstallState | null;
   error?: string;
+  reason?: AppReason;
 }
 
 export interface SetupApps {
