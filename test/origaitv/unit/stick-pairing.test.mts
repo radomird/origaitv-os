@@ -14,7 +14,7 @@ import { after, before, test } from "node:test";
 import { x25519Pair } from "../../../daemon/phone-channel.ts";
 import { Phones } from "../../../daemon/phones.ts";
 import { Daemon } from "../../../daemon/server.ts";
-import { pairPhone } from "./phone-client.mts";
+import { pairFromTv, pairPhone } from "./phone-client.mts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const dir = mkdtempSync(join(tmpdir(), "origaitv-stick-pairing-"));
@@ -74,6 +74,50 @@ test("T30.2 once setup is done, the stick's secret pairs nothing, and it goes", 
   assert.deepEqual(phones.pair(asking(secret), undefined, false), { error: "That code ran out. Pair again from your TV." });
   assert.ok(!existsSync(path));
   assert.equal(phones.waitingForStick(), false);
+});
+
+test("the stick's page's phone: setup shows its code meanwhile, and the secret still pairs that phone, from its own browser", () => {
+  const secret = randomBytes(16);
+  const path = join(dir, `stick-pairing-${++n}.json`);
+  writeFileSync(path, JSON.stringify({ secret: b64u(secret), wait: false }), { mode: 0o600 });
+  const phones = new Phones({ path: join(dir, `phones-${n}.json`), handed: path });
+  assert.equal(phones.waitingForStick(), false, "no wait: the code shows at once");
+  const { code } = phones.code();
+  assert.ok("id" in phones.pair(asking(secret, "Safari"), undefined, true), "the link's secret pairs");
+  assert.ok(!existsSync(path));
+  assert.equal(phones.showing()?.code, code, "the code is still there");
+});
+
+test("on a TV with no cable, the stick's page's phone is listed once: its link takes the place of its pairing in the sign-in sheet", () => {
+  const secret = randomBytes(16);
+  const path = join(dir, `stick-pairing-${++n}.json`);
+  writeFileSync(path, JSON.stringify({ secret: b64u(secret), wait: false }), { mode: 0o600 });
+  const phones = new Phones({ path: join(dir, `phones-${n}.json`), handed: path });
+  // Over the TV's own Wi-Fi during setup: the sheet, by the TV's code.
+  let { code } = phones.code();
+  assert.ok("id" in phones.pair(asking(code, "iPhone"), undefined, true, true));
+  // Another phone with another name, over the same Wi-Fi, stays.
+  ({ code } = phones.code());
+  assert.ok("id" in phones.pair(asking(code, "Android phone"), undefined, true, true));
+  // And one by code on the home network stays too, whatever its name.
+  ({ code } = phones.code());
+  assert.ok("id" in phones.pair(asking(code, "iPhone"), undefined, true, false));
+  // Then the stick's link, in that iPhone's own browser.
+  const linked = phones.pair(asking(secret, "iPhone"), undefined, true);
+  assert.ok("id" in linked);
+  assert.deepEqual(phones.list().map((p) => p.name).sort(), ["Android phone", "iPhone", "iPhone"]);
+  assert.ok(phones.list().some((p) => p.id === linked.id), "the link's pairing is the one kept");
+  assert.ok(!JSON.stringify(phones.list()).includes("setupHotspot"));
+});
+
+test("with an app's phone to come, a pairing over the TV's own Wi-Fi is left alone", () => {
+  const secret = randomBytes(16);
+  const path = handed(secret);
+  const phones = new Phones({ path: join(dir, `phones-${n}.json`), handed: path });
+  const { code } = phones.code();
+  assert.ok("id" in phones.pair(asking(code, "iPhone"), undefined, true, true));
+  assert.ok("id" in phones.pair(asking(secret, "iPhone"), undefined, true));
+  assert.equal(phones.list().length, 2);
 });
 
 test("a stick secret that isn't 16 bytes, or no file, is no secret", () => {
@@ -165,4 +209,107 @@ test("T30.2 with setup done the welcome screen hears nothing of the stick's phon
   assert.equal((await setupInfo()).stickPhone, false);
   await assert.rejects(pairPhone(phone, { secret: b64u(secret) }, "late"), /ran out/);
   assert.ok(!existsSync(join(dir, "state", "stick-pairing.json")), "it goes");
+});
+
+// The stick's secret lasts a day from the TV's first start. A clock of the
+// test's own: which boot, how long into it, and the wall clock.
+const HOUR = 60 * 60_000;
+function clocked(wait = true) {
+  const secret = randomBytes(16);
+  const path = join(dir, `stick-pairing-${++n}.json`);
+  writeFileSync(path, JSON.stringify({ secret: b64u(secret), wait }), { mode: 0o600 });
+  const now = { boot: "first", sinceBootMs: 30_000, wallMs: Date.parse("2026-11-24T10:00:00Z") };
+  const phones = () => new Phones({ path: join(dir, `phones-${n}.json`), handed: path, clock: () => ({ ...now }) });
+  return { secret, path, now, phones };
+}
+
+test("T30.2 the stick's secret still pairs 23 hours after the first start, with setup unfinished", () => {
+  const { secret, now, phones } = clocked();
+  phones();
+  now.sinceBootMs += 23 * HOUR;
+  now.wallMs += 23 * HOUR;
+  const tv = phones();
+  assert.equal(tv.waitingForStick(), true);
+  assert.ok("id" in tv.pair(asking(secret, "iPhone"), undefined, true));
+});
+
+test("T30.2 a day after the first start the stick's secret is gone, with setup unfinished, and setup stops waiting for its phone", () => {
+  const { secret, path, now, phones } = clocked();
+  phones();
+  now.sinceBootMs += 24 * HOUR;
+  now.wallMs += 24 * HOUR;
+  const tv = phones();
+  assert.equal(tv.waitingForStick(), false);
+  assert.ok(!existsSync(path), "the TV dropped it");
+  const { code } = tv.code();
+  assert.deepEqual(tv.pair(asking(secret, "iPhone"), undefined, true), { error: "That isn't the code on your TV" });
+  assert.ok("id" in tv.pair(asking(code, "iPhone"), undefined, true), "the TV's own code pairs instead");
+});
+
+test("T30.2 a wall clock that's wrong at the first start neither cuts the day short nor stretches it", () => {
+  // The first start's wall clock is a year behind, until the TV has the time.
+  const { now, phones } = clocked();
+  now.wallMs -= 365 * 24 * HOUR;
+  phones();
+  // An hour in, the TV sets its clock right: a jump of a year.
+  now.sinceBootMs += HOUR;
+  now.wallMs += 365 * 24 * HOUR + HOUR;
+  assert.equal(phones().waitingForStick(), true, "the jump doesn't use the day up");
+  // A restart 22 hours later, by the corrected clock: 23 hours in all.
+  now.boot = "second";
+  now.sinceBootMs = 20_000;
+  now.wallMs += 22 * HOUR;
+  assert.equal(phones().waitingForStick(), true);
+  // And another, past the day.
+  now.boot = "third";
+  now.wallMs += 2 * HOUR;
+  assert.equal(phones().waitingForStick(), false, "the day ends on time");
+});
+
+test("T30.2 a wall clock set back after a restart doesn't give the secret its day again", () => {
+  const { now, phones } = clocked();
+  phones();
+  now.sinceBootMs += 20 * HOUR;
+  now.wallMs += 20 * HOUR;
+  assert.equal(phones().waitingForStick(), true);
+  // After a restart the clock is a day behind: what was used still counts.
+  now.boot = "second";
+  now.sinceBootMs = 10_000;
+  now.wallMs -= 24 * HOUR;
+  assert.equal(phones().waitingForStick(), true);
+  // Five hours into this boot, by its own clock, the day is over.
+  now.sinceBootMs += 5 * HOUR;
+  now.wallMs += 5 * HOUR;
+  assert.equal(phones().waitingForStick(), false);
+});
+
+test("on a TV with no cable, the pairing the stick's link replaces is forgotten through and through: its open session ends too", async () => {
+  // A daemon whose own Wi-Fi is this machine's loopback, so a phone on the
+  // phones' port counts as one on the TV's own Wi-Fi.
+  const state = join(dir, "state-hotspot");
+  mkdirSync(state, { recursive: true });
+  const linkSecret = randomBytes(16);
+  writeFileSync(join(state, "stick-pairing.json"), JSON.stringify({ secret: b64u(linkSecret), wait: false }), { mode: 0o600 });
+  const other = new Daemon({ root: ROOT, state, builtins: null, port: 0, log: () => {}, running: "0.3.0-1", lanPort: 0, lanHost: "127.0.0.1", address: () => "192.168.1.20", hotspotAddress: "127.0.0.1", phoneWaitMs: 400 });
+  try {
+    const otherTv = `http://127.0.0.1:${await other.listen()}`;
+    const otherPhone = `http://127.0.0.1:${other.lanPort}`;
+    // In the sheet for Wi-Fi sign-ins, with the TV's code, during setup.
+    const sheet = await pairFromTv(otherTv, otherPhone, "iPhone");
+    assert.equal((await sheet.fetch("/api/phone/state")).status, 200);
+    // Then the same iPhone from the stick's link in its own browser.
+    const linked = await pairPhone(otherPhone, { secret: b64u(linkSecret) }, "iPhone");
+    assert.equal((await linked.fetch("/api/phone/state")).status, 200);
+    const listed = (await (await fetch(`${otherTv}/api/phones`)).json()) as { phones: { id: string }[] };
+    assert.deepEqual(listed.phones.map((p) => p.id), [linked.kept.id], "listed once");
+    // The sheet's session went with its pairing, straight away, as when a
+    // phone is forgotten in Settings, not at its next request.
+    const sessions = (other as unknown as { phoneChannel: { sessions: Map<string, { phone: string }> } }).phoneChannel.sessions;
+    assert.ok(![...sessions.values()].some((session) => session.phone === sheet.kept.id), "the replaced pairing's session is gone");
+    assert.ok([...sessions.values()].some((session) => session.phone === linked.kept.id));
+    const after = await sheet.fetch("/api/phone/state").then((r) => r.status, () => 401);
+    assert.notEqual(after, 200);
+  } finally {
+    await other.close();
+  }
 });

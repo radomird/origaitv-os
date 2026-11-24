@@ -1616,6 +1616,13 @@ export class Daemon {
     };
   }
 
+  // What the daemon holds for a phone that's no longer paired: its open
+  // sessions and its game pads.
+  private forgotten(id: string): void {
+    this.phoneChannel.forget(id);
+    this.pads.forget(id);
+  }
+
   // --- The setup hotspot's captive page ---------------------------------------
 
   // Answers on the hotspot's own address and nowhere else. A phone that joins
@@ -1771,15 +1778,20 @@ export class Daemon {
       // find its TV by afterwards, and the TV's proof covers it. The state
       // has it too, sealed.
       // The USB stick's secret pairs its phone until setup is done.
-      const paired = this.phones.pair(asked, (await this.boxId()).boxId, !(await this.setup()).done);
+      const overHotspot = (request.socket.localAddress ?? "").replace(/^::ffff:/, "") === (this.options.hotspotAddress ?? HOTSPOT_ADDRESS);
+      const paired = this.phones.pair(asked, (await this.boxId()).boxId, !(await this.setup()).done, overHotspot);
       if ("error" in paired) {
         this.log("a phone sent a wrong pairing code");
         this.json(response, 403, { ok: false, error: paired.error });
         return;
       }
+      // The stick's phone, from its own browser, in place of its pairing in
+      // the sheet for Wi-Fi sign-ins: that one's forgotten like any other.
+      const { replaces, ...answer } = paired;
+      if (replaces) this.forgotten(replaces);
       this.log(`${paired.phone.name} is paired`);
       this.broadcast("phones", { paired: paired.phone.name });
-      this.json(response, 200, { ok: true, ...paired });
+      this.json(response, 200, { ok: true, ...answer });
       return;
     }
 
@@ -3318,8 +3330,7 @@ export class Daemon {
         this.json(response, 404, { ok: false, error: "Couldn't find that phone" });
         return;
       }
-      this.phoneChannel.forget(phone[1]);
-      this.pads.forget(phone[1]);
+      this.forgotten(phone[1]);
       this.log("a phone was forgotten");
       this.broadcast("phones", {});
       this.json(response, 200, { ok: true, phones: this.phones.list() });
