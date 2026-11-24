@@ -105,6 +105,8 @@ export interface BoxOptions {
   listenIdleMs?: number;
   // A stand-in for TMDB, through the router's service (stage 8).
   tmdb?: TmdbGet;
+  // This boot's id, which a test changes for a restart.
+  bootId?: () => string;
   // Feature switches to set (daemon/features.ts). Every switch is on by
   // default, so a test turns one off to check the screen it replaced, or
   // gives PHASE_1 for every one. A box with one turned on is on edge.
@@ -410,6 +412,7 @@ export async function startBox(
     planUsage: options.planUsage ?? (async () => null),
     listenIdleMs: options.listenIdleMs,
     box: options.box ?? { machine: machine("nuc8i5beh") },
+    bootId: options.bootId ?? (() => "00000000-0000-4000-8000-000000000001"),
     // The channel, as origaitv channel keeps it: none, so stable, until a test
     // puts the box on edge (ADR-053).
     channelFile: join(state, "..", "channel"),

@@ -68,7 +68,7 @@ import { askRoutes, askView, type AskRoutes } from "./routes/ask.ts";
 import { NO_AI } from "./executors/index.ts";
 import { NEEDS_PIN, NOT_READY, NO_APP, WENT_WRONG, needsPin } from "./notices.ts";
 import type { ExecBuilds } from "./executors/make.ts";
-import { Pin, type PinStatus } from "./pin.ts";
+import { bootId, Pin, type PinStatus } from "./pin.ts";
 import { NO_PROFILE, Profiles, type Profile } from "./profiles.ts";
 import { NetFilter } from "./net-filter.ts";
 import { pageAppId, PageApps } from "./page-apps.ts";
@@ -626,7 +626,7 @@ export class Daemon {
     this.phoneChannel = new PhoneChannel({ phone: (id) => this.phones.key(id) });
     this.hotspot = new Hotspot({ state: options.state, run: options.hotspotRun });
     this.network = new TvNetwork({ hotspot: this.hotspot, run: options.hotspotRun, interfaces: options.interfaces, changed: (state) => this.toPages("network", state) });
-    this.setupState = new Setup({ path: join(options.state, "setup.json"), on: (feature) => this.features.on(feature) });
+    this.setupState = new Setup({ path: join(options.state, "setup.json"), on: (feature) => this.features.on(feature), bootId: options.bootId ?? bootId });
     this.ai = new Ai({ state: options.state, channel: () => this.channel() });
     this.aiIcons = new AiIcons({ state: options.state, userAgent: userAgent(options.root), sites: options.aiSites, log: this.log });
     this.planSignIn = new PlanSignIn({ state: options.state, drop: join(options.state, "build-drop"), run: options.buildRun ?? "/run/origaitv-build", signedIn: (provider) => this.planSignedIn(provider) });
@@ -2879,6 +2879,9 @@ export class Daemon {
         // than show a code.
         stickPhone: !(await this.setup()).done && this.phones.waitingForStick(),
         pin: this.pin.status().set,
+        // This boot, so getting ready can tell the TV restarted since it
+        // installed an update.
+        boot: (this.options.bootId ?? bootId)(),
       });
       return;
     }

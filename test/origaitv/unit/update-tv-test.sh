@@ -384,7 +384,7 @@ grep -q "^runuser -u someone .*omarchy-update.lock" "$calls" || fail "the owner'
 flock -n "$runtime/omarchy-update.lock" true || fail "the lock is let go when the update is done"
 # shellcheck disable=SC2016 # the held lock's command is run later
 flock -n "$runtime/omarchy-update.lock" "$BASH" -c '"$1" >/dev/null 2>&1' _ "$ROOT/bin/origaitv-update-tv" && fail "an update says so when omarchy update is already running"
-[[ $(jq -c '[.state, .detail]' "$progress") == '["failed","nothing changed"]' ]] || fail "an update that couldn't start says nothing changed" "$(cat "$progress")"
+[[ $(jq -c '[.state, .detail, .reason]' "$progress") == '["failed","nothing changed","busy"]' ]] || fail "an update that couldn't start says nothing changed, as another update is running" "$(cat "$progress")"
 grep -q "already running" "$ORIGAITV_UPDATE_STATE/update.log" || fail "the log says why"
 pass "Omarchy's update lock is held for the whole update, so omarchy update can't run beside it"
 
@@ -455,7 +455,7 @@ pass "S2.12 an update with a new kernel restarts the box, and the TV says so"
 tested 0.2.9-1
 printf '%s\n' "origaitv 0.2.1-1 -> 0.3.0-1" >"$SCRATCH/pending-now"
 update && fail "an update that waits says so"
-[[ $(jq -c '[.state, .detail]' "$progress") == '["failed","not tested yet"]' ]] ||
+[[ $(jq -c '[.state, .detail, .reason]' "$progress") == '["failed","not tested yet","untested"]' ]] ||
   fail "an update that waits for the nightly run says so" "$(cat "$progress" "$ORIGAITV_UPDATE_STATE/update.log")"
 [[ -z $(steps) ]] || fail "nothing runs before the update is known to go ahead" "$(steps)"
 [[ ! -s $SCRATCH/sudoers-seen && -z $(ls -A "$sudoers") ]] || fail "H1 and no sudo rule either"
@@ -471,12 +471,24 @@ pass "on edge an update from the TV doesn't wait for the nightly run"
 # A failed update that changed nothing.
 touch "$SCRATCH/fail/omarchy-update-keyring"
 update && fail "a failed update says so"
-[[ $(jq -c '[.state, .detail]' "$progress") == '["failed","nothing changed"]' ]] ||
+[[ $(jq -c '[.state, .detail, .reason, .restart]' "$progress") == '["failed","nothing changed","unchanged",null]' ]] ||
   fail "a failed update that changed nothing says so" "$(cat "$progress")"
 [[ $(steps) == *"omarchy-update-keyring" ]] || fail "a step that fails ends the update there" "$(steps)"
 [[ -z $(ls -A "$sudoers") && -z $(ls -A "$run_dir") ]] || fail "H1 nothing is left behind after a failure"
 rm "$SCRATCH/fail/omarchy-update-keyring"
 pass "an update that fails before anything changed says nothing changed"
+
+# Why it failed, from what pacman said, for the words on screen: no network,
+# a mirror that has moved on, and a full disk.
+for said in "error: failed retrieving file 'core.db' from mirror : Could not resolve host: mirror|offline" \
+  "error: failed retrieving file 'steam-1.0.0.85-1-x86_64.pkg.tar.zst' from mirror : The requested URL returned error: 404|mirror" \
+  "error: could not extract /usr/lib/libfoo.so (No space left on device)|space"; do
+  stub omarchy-update-keyring "echo \"${said%|*}\" >&2; exit 1"
+  update && fail "a failed update says so"
+  [[ $(jq -r .reason "$progress") == "${said#*|}" ]] || fail "an update that failed with \"${said%|*}\" says ${said#*|}" "$(cat "$progress")"
+done
+stub omarchy-update-keyring
+pass "a failed update says why: offline, the mirror moved on, or the disk is full"
 
 # One that fails after the packages went in: a migration that doesn't finish.
 touch "$SCRATCH/fail/omarchy-migrate"
@@ -485,8 +497,69 @@ update && fail "an update whose migrations fail says so"
   fail "an update that fails after the packages says it stopped halfway" "$(cat "$progress")"
 ! grep -q "^the owner's hook$" "$calls" || fail "the owner's hooks don't run after a failed migration" "$(steps)"
 [[ -z $(ls -A "$run_dir") ]] || fail "H1 the folder with the stand-in is gone after a failed migration"
-rm "$SCRATCH/fail/omarchy-migrate"
+[[ $(jq -r .reason "$progress") == "halfway" && $(jq -r .restart "$progress") == "null" ]] || fail "it says why, and the box needs no restart" "$(cat "$progress")"
 pass "an update that fails after the packages went in says it stopped halfway"
+
+# One whose new kernel went in before a later step failed: the running
+# kernel's modules are gone, so the update says the box needs a restart all
+# the same, and leaves the restart to the person, since it failed.
+# Here an update of the system's packages alone: OrigaiTV's and Omarchy's
+# versions don't change, and it still says it stopped halfway, not that
+# nothing changed.
+touch "$SCRATCH/omarchy-only"
+ORIGAITV_MODULES_DIR="$SCRATCH/new-kernel" update && fail "an update whose migrations fail after a new kernel says so"
+[[ $(jq -c '[.state, .detail, .reason, .restart]' "$progress") == '["failed","the update stopped halfway","halfway",true]' ]] ||
+  fail "a failed update after a new kernel says it stopped halfway and the box needs a restart" "$(cat "$progress")"
+! grep -q "^systemctl reboot" "$calls" || fail "a failed update doesn't restart the box by itself" "$(cat "$calls")"
+rm "$SCRATCH/fail/omarchy-migrate" "$SCRATCH/omarchy-only"
+pass "a failed update after a new kernel went in says it stopped halfway and the box needs a restart"
+
+# Why is read from the step that failed: a flatpak that couldn't connect,
+# which doesn't stop the update, doesn't make a later failure "offline".
+stub flatpak
+stub omarchy-update-orphan-pkgs "echo 'error: failed to connect to flathub' >&2; exit 0"
+touch "$SCRATCH/fail/omarchy-migrate"
+cat >"$SCRATCH/bin/flatpak" <<SH
+#!/bin/bash
+echo "flatpak \$*" >>"$calls"
+echo "error: Unable to load summary from remote flathub: failed to connect" >&2
+exit 1
+SH
+chmod +x "$SCRATCH/bin/flatpak"
+update && fail "an update whose migrations fail says so"
+[[ $(jq -r .reason "$progress") == "halfway" ]] || fail "a flatpak that couldn't connect earlier doesn't make it offline" "$(cat "$progress")"
+rm "$SCRATCH/fail/omarchy-migrate" "$SCRATCH/bin/flatpak"
+stub omarchy-update-orphan-pkgs
+pass "a failed update's reason comes from the step that failed"
+
+# tested.json that can't be fetched is no network, not an update that isn't
+# tested yet.
+mv "$SCRATCH/tested/tested.json" "$SCRATCH/tested.json.away"
+update && fail "an update without tested.json says so"
+[[ $(jq -c '[.detail, .reason]' "$progress") == '["not tested yet","offline"]' ]] || fail "tested.json that couldn't be fetched says offline" "$(cat "$progress" "$ORIGAITV_UPDATE_STATE/update.log")"
+mv "$SCRATCH/tested.json.away" "$SCRATCH/tested/tested.json"
+pass "tested.json that can't be fetched gives no network as the reason"
+
+# A long download says nothing, and the update's progress still says it's
+# going, every minute (here every second), so the TV doesn't call it
+# stopped. Once it's over, nothing writes the progress any more, and the
+# update's lock is let go.
+stub omarchy-update-system-pkgs "touch '$SCRATCH/upgraded'
+jq -r .at '$progress' >'$SCRATCH/at-before'
+command -p sleep 3
+jq -r .at '$progress' >'$SCRATCH/at-after'"
+ORIGAITV_UPDATE_BEAT=1 update || fail "an update with a long quiet download goes through" "$(cat "$SCRATCH/out")"
+[[ -s $SCRATCH/at-before && $(cat "$SCRATCH/at-before") != "$(cat "$SCRATCH/at-after")" ]] ||
+  fail "the progress is written again while the download says nothing" "$(cat "$SCRATCH/at-before" "$SCRATCH/at-after" 2>&1)"
+cp "$progress" "$SCRATCH/progress-done"
+sleep 2
+cmp -s "$progress" "$SCRATCH/progress-done" || fail "nothing writes the progress once the update's over" "$(cat "$progress")"
+flock -n "$runtime/omarchy-update.lock" true || fail "the update's lock is let go with the heartbeat gone"
+stub omarchy-update-system-pkgs "touch '$SCRATCH/upgraded'
+echo ':: Synchronizing package databases...'
+echo '(1/4) upgrading origaitv'
+echo '(4/4) upgrading omarchy'"
+pass "a long download that says nothing still gives the TV news every minute"
 
 # The box stays awake for it, as it did under Omarchy's own update.
 grep -qx 'ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle --who=OrigaiTV "--why=installing an update" --mode=block /usr/bin/origaitv-update-tv' "$ROOT/system/origaitv-update-tv.service" ||

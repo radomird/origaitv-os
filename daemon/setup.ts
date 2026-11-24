@@ -93,6 +93,15 @@ export type Goal = (typeof GOALS)[number];
 export const UPDATES = ["checking", "installing", "done", "none", "failed", "skipped"] as const;
 export type UpdateFirst = (typeof UPDATES)[number];
 
+// Why the update didn't go ahead, for the words on screen: the box was
+// offline, another update was running, the nightly run hadn't passed it yet,
+// the disk was full, the mirror had moved on, it stopped halfway or changed
+// nothing, it stopped giving news or was cut off by a restart, or the check
+// or the update wouldn't start. "waiting" is the nightly run's hold found by the check, which
+// setup carries on past without installing.
+export const WHYS = ["offline", "busy", "untested", "space", "mirror", "halfway", "unchanged", "stalled", "cut", "check", "start", "waiting"] as const;
+export type Why = (typeof WHYS)[number];
+
 export interface Ready {
   // When the page asked for the update check, so an older check's answer
   // doesn't count.
@@ -101,6 +110,11 @@ export interface Ready {
   // The OrigaiTV versions on either side of the update.
   from: string | null;
   to: string | null;
+  // The boot the update was installed in, so a restart since is told by the
+  // box itself rather than by its clock, which may be wrong after one.
+  boot: string | null;
+  // Why it didn't go ahead, when it didn't.
+  why: Why | null;
 }
 
 export interface SetupState {
@@ -139,13 +153,15 @@ const ZONE = /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+){0,2}$/;
 const AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/;
 // A package version, or "dev" for a checkout.
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}$/;
+// A boot's id, as the kernel gives it.
+const BOOT = /^[0-9a-f-]{1,64}$/;
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "+00:00");
 }
 
 function fresh(): SetupState {
-  return { done: false, step: "welcome", finished: {}, keyboard: false, goal: null, ready: { asked: null, update: null, from: null, to: null }, wishes: [], muted: false, phoneZone: null };
+  return { done: false, step: "welcome", finished: {}, keyboard: false, goal: null, ready: { asked: null, update: null, from: null, to: null, boot: null, why: null }, wishes: [], muted: false, phoneZone: null };
 }
 
 // The box's network, from its interfaces: a wired or Wi-Fi address that
@@ -164,13 +180,15 @@ export class Setup {
   private path: string;
   private on: (feature: Feature) => Promise<boolean>;
   private order: readonly StepEntry[];
+  private boot: () => string;
 
   // The switches come from daemon/features.ts. Tests can give an order of
-  // their own, as with a step behind a switch.
-  constructor(options: { path: string; on?: (feature: Feature) => Promise<boolean>; order?: readonly StepEntry[] }) {
+  // their own, as with a step behind a switch, and a boot of their own.
+  constructor(options: { path: string; on?: (feature: Feature) => Promise<boolean>; order?: readonly StepEntry[]; bootId?: () => string }) {
     this.path = options.path;
     this.on = options.on ?? (async () => false);
     this.order = options.order ?? ORDER;
+    this.boot = options.bootId ?? (() => "");
   }
 
   // What a person reads for a step: its name in the bar, not its id.
@@ -233,6 +251,8 @@ export class Setup {
       update: UPDATES.includes(ready.update as UpdateFirst) ? (ready.update as UpdateFirst) : null,
       from: typeof ready.from === "string" && VERSION.test(ready.from) ? ready.from : null,
       to: typeof ready.to === "string" && VERSION.test(ready.to) ? ready.to : null,
+      boot: typeof ready.boot === "string" && BOOT.test(ready.boot) ? ready.boot : null,
+      why: WHYS.includes(ready.why as Why) ? (ready.why as Why) : null,
     };
     state.muted = data.muted === true;
     if (typeof data.phoneZone === "string" && ZONE.test(data.phoneZone)) state.phoneZone = data.phoneZone;
@@ -297,12 +317,15 @@ export class Setup {
     if (!UPDATES.includes(c.update as UpdateFirst)) return { error: `update is one of ${UPDATES.join(", ")}` };
     const version = (value: unknown) => value === undefined || value === null || (typeof value === "string" && VERSION.test(value));
     if (!version(c.from) || !version(c.to)) return { error: "from and to are versions" };
+    if (c.why !== undefined && c.why !== null && !WHYS.includes(c.why as Why)) return { error: `why is one of ${WHYS.join(", ")}` };
     const state = await this.read();
     state.ready = {
       asked: c.update === "checking" ? now() : state.ready.asked,
       update: c.update as UpdateFirst,
       from: typeof c.from === "string" ? c.from : c.from === null ? null : state.ready.from,
       to: typeof c.to === "string" ? c.to : c.to === null ? null : state.ready.to,
+      boot: c.update === "installing" ? this.boot() || null : c.update === "checking" ? null : state.ready.boot,
+      why: c.update === "failed" || c.update === "none" ? ((c.why as Why | undefined) ?? null) : null,
     };
     return { state: await this.save(state) };
   }
