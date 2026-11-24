@@ -78,6 +78,16 @@ const asked = (page: Page, cmd: string) => page.waitForFunction((c) => (window a
 const line = (page: Page) => page.locator(".setup-line").textContent();
 const bar = (page: Page) => page.locator(".bar-info").textContent();
 const says = (page: Page, text: string) => page.waitForFunction((t) => document.querySelector(".setup-line")?.textContent === t, text, { timeout: 10_000 });
+// The page's own clock, which the stall is timed by, and a skip forward
+// until it really is at the time given: one skip can be left out while the
+// page is busy, so it's checked on the page, not taken on trust.
+const pageNow = (page: Page) => page.evaluate(() => performance.now());
+async function skipTo(page: Page, at: number): Promise<void> {
+  for (let left = at - (await pageNow(page)); left > 0; left = at - (await pageNow(page))) {
+    await page.clock.fastForward(Math.ceil(left));
+    await page.waitForTimeout(200);
+  }
+}
 const movesOn = (page: Page) => page.waitForFunction(() => (window as unknown as { origaitvSetup: { route(): string } }).origaitvSetup.route() !== "ready", null, { timeout: 10_000 });
 
 // What the update check says: system updates waiting, and nothing newer of
@@ -163,10 +173,11 @@ test("an update that stops giving news counts as failed after 15 minutes, says s
     await asked(page, "update-install");
     // The update never says anything: its service didn't start.
     await says(page, "Updating your TV. It can take a few minutes and restart once.");
-    await page.clock.fastForward("14:00");
+    const from = await pageNow(page);
+    await skipTo(page, from + 14 * 60_000);
     await page.waitForTimeout(1500);
     assert.equal((await step()).ready.update, "installing", "still updating before the 15 minutes");
-    await page.clock.fastForward("01:30");
+    await skipTo(page, from + 15.5 * 60_000);
     await says(page, "The update stopped answering. Try again in Settings.");
     assert.match((await bar(page)) ?? "", /^Update stopped answering/);
     assert.equal((await step()).ready.why, "stalled");
@@ -187,10 +198,11 @@ test("a long download that says nothing still counts as news: the update's progr
     // The download is under way at 40, and says nothing more for 20
     // minutes. Only its heartbeat writes the progress again, every few
     // minutes here.
-    for (let minute = 0; minute < 20; minute += 5) {
+    const from = await pageNow(page);
+    for (let minute = 5; minute <= 20; minute += 5) {
       progress("running", "packages", 40);
       await page.waitForTimeout(1500);
-      await page.clock.fastForward("05:00");
+      await skipTo(page, from + minute * 60_000);
     }
     await page.waitForTimeout(1500);
     assert.equal((await step()).ready.update, "installing", "still updating after 20 minutes with a heartbeat");
