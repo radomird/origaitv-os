@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { installLocal, removeApp } from "../../../daemon/apps/install.ts";
 import { asAddress, cleanTheme } from "../../../daemon/home.ts";
+import { omarchyIconName } from "../../../daemon/package-icon.ts";
 import type { Daemon } from "../../../daemon/server.ts";
 import { startBox } from "../ui/box.mts";
 
@@ -225,6 +226,22 @@ test("a native app with no logo of its own gets the icon its installed package g
   assert.equal((await fetch(`${url}/api/apps/origaitv.games/icon`)).status, 404);
 });
 
+test("a native app whose program didn't install isn't on home, and comes back once its package is in", async () => {
+  // As on rc4: Steam's app is on the TV, and pacman has no steam package.
+  const pacman = join(appsDir, "..", "pacman-local");
+  const ids = async () => (await get("/api/home")).apps.map((app: any) => app.id);
+  assert.ok((await ids()).includes("origaitv.games"), "with no pacman at all, as on a developer's computer, the program counts as there");
+  mkdirSync(join(pacman, "bash-5.3.3-2"), { recursive: true });
+  try {
+    assert.ok(!(await ids()).includes("origaitv.games"), "without Steam's package, home has no tile for it");
+    assert.ok((await ids()).includes("origaitv.sample"), "and every app that isn't native is still there");
+    mkdirSync(join(pacman, "steam-1.0.0.85-1"));
+    assert.ok((await ids()).includes("origaitv.games"), "with Steam's package in, the tile's back");
+  } finally {
+    rmSync(pacman, { recursive: true, force: true });
+  }
+});
+
 test("a game platform Omarchy sets up itself has the icon Omarchy keeps for its own app of that name, read on the box", async () => {
   const byId = async () => Object.fromEntries((await get("/api/home")).apps.map((app: any) => [app.id, app]));
   const share = join(appsDir, "..", "share");
@@ -240,6 +257,25 @@ test("a game platform Omarchy sets up itself has the icon Omarchy keeps for its 
     mkdirSync(join(share, "applications"), { recursive: true });
     writeFileSync(join(share, "applications", "steam.desktop"), "[Desktop Entry]\nName=Steam\nExec=/usr/bin/steam %U\nIcon=steam\n");
     assert.equal(await (await fetch(`${url}/api/apps/origaitv.games/icon`)).text(), "the package's icon");
+  } finally {
+    rmSync(share, { recursive: true, force: true });
+  }
+});
+
+test("a game platform Omarchy sets up itself has the icon Omarchy's package puts in the hicolor theme, by the name it gives it", async () => {
+  // Omarchy's package keeps no applications/icons folder: its own apps'
+  // icons go in the hicolor theme, named in lower case with dashes, as
+  // "Battle.net" is battle-net.png.
+  assert.equal(omarchyIconName("Battle.net"), "battle-net");
+  assert.equal(omarchyIconName("Retro Gaming"), "retro-gaming");
+  const byId = async () => Object.fromEntries((await get("/api/home")).apps.map((app: any) => [app.id, app]));
+  const share = join(appsDir, "..", "share");
+  const icons = join(share, "icons", "hicolor", "256x256", "apps");
+  mkdirSync(icons, { recursive: true });
+  writeFileSync(join(icons, "games.png"), "Omarchy's themed icon");
+  try {
+    assert.equal((await byId())["origaitv.games"].icon, "/api/apps/origaitv.games/icon");
+    assert.equal(await (await fetch(`${url}/api/apps/origaitv.games/icon`)).text(), "Omarchy's themed icon");
   } finally {
     rmSync(share, { recursive: true, force: true });
   }

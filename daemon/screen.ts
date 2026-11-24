@@ -65,7 +65,7 @@ import { installedPackage, userAgent } from "./identity.ts";
 import { MUTE, PAUSE, RESUME, UNMUTE } from "./media.ts";
 import { MUSIC, MusicApp, MusicLibrary, MusicPlayer } from "./music.ts";
 import { OmarchyThemes } from "./omarchy-themes.ts";
-import { WidevineWatch } from "./box.ts";
+import { WidevineWatch, widevineHint } from "./box.ts";
 import { cdpPage } from "./page.ts";
 import { PageAskWatch, type PageAnswer } from "./page-asks.ts";
 import { PageMedia } from "./page-media.ts";
@@ -436,6 +436,12 @@ interface Options {
   // Whether Fit to screen keeps a margin round the TV now (daemon/display.ts),
   // so apps are maximized inside it. None unless it says.
   fitted?: () => boolean;
+  // The Widevine module a services' Chromium starting now would load, as its
+  // hint names it (box.ts, widevineHint), or null with none yet.
+  widevine?: () => Promise<string | null>;
+  // How long the services' Chromium has to end when it's asked to, before
+  // it's started again anyway: 10 s.
+  servicesExitMs?: number;
 }
 
 // Omarchy's shell draws every layer it has under an omarchy- name: its bar,
@@ -538,6 +544,13 @@ export class Screen {
   private nightWatch: ReturnType<typeof setInterval> | null = null;
   // Whether Fit to screen keeps a margin round the TV now.
   private fitted: () => boolean;
+  // Protected video (Widevine): the module the services' Chromium loaded as
+  // it started, and whether a newer one has come since, which that Chromium
+  // can't use until it starts again (widevineChanged).
+  private widevine?: () => Promise<string | null>;
+  private servicesModule: string | null = null;
+  private servicesStale = false;
+  private servicesExitMs: number;
 
   constructor(options: Options) {
     this.hypr = options.hyprland;
@@ -574,6 +587,8 @@ export class Screen {
     this.lastPlayed = this.now();
     this.runningPackage = options.running ?? installedPackage();
     this.fitted = options.fitted ?? (() => false);
+    this.widevine = options.widevine;
+    this.servicesExitMs = options.servicesExitMs ?? 10_000;
   }
 
   // Runs one step at a time, in the order things happened.
@@ -1275,7 +1290,10 @@ export class Screen {
         // An item too, such as one to continue: the app opens it with its own
         // playback.open once its page is there (ADR-016).
         const item = request.item && typeof request.item === "object" ? request.item : null;
-        if (this.opens.some((o) => o.id === id && o.address && this.windows.has(o.address))) {
+        // A web app open behind home while a new Widevine module waits goes
+        // through openWeb below, which starts the services' Chromium again.
+        const waiting = this.servicesStale && this.opens.some((o) => o.id === id && o.role === "web" && !o.game);
+        if (!waiting && this.opens.some((o) => o.id === id && o.address && this.windows.has(o.address))) {
           const reply = await this.reopen(id);
           if (item) this.playback?.play?.(id, item);
           return reply;
@@ -1577,6 +1595,9 @@ export class Screen {
         this.startHome();
       }
       this.running();
+      // Home is in front: the services' Chromium can start again for a new
+      // Widevine module, with its apps paused behind home.
+      if (this.servicesStale && !this.tvOff && this.servicesRestartable()) await this.restartServices("home is in front");
     }).then(() => ({ ok: true }));
   }
 
@@ -1646,17 +1667,82 @@ export class Screen {
   // An app open behind home comes back where it was, playing again if Home
   // paused it.
   private reopen(id: string): Promise<object> {
-    return this.queue(async () => {
-      const entry = this.opens.find((o) => o.id === id);
-      if (!entry?.address || !this.windows.has(entry.address)) return;
-      await this.toFront(entry.address);
-      entry.usedAt = this.now();
-      if (entry.paused) await this.media(entry, RESUME);
-      entry.paused = false;
-      this.running();
-      // Its site's icon, if the last look at its page came to nothing.
-      if (entry.role === "web" && !/^(https?|data):/.test(entry.id)) void this.siteIcon(id, entry);
-    }).then(() => ({ ok: true }));
+    return this.queue(() => this.reopenNow(id)).then(() => ({ ok: true }));
+  }
+
+  private async reopenNow(id: string): Promise<void> {
+    const entry = this.opens.find((o) => o.id === id);
+    if (!entry?.address || !this.windows.has(entry.address)) return;
+    await this.toFront(entry.address);
+    entry.usedAt = this.now();
+    if (entry.paused) await this.media(entry, RESUME);
+    entry.paused = false;
+    this.running();
+    // Its site's icon, if the last look at its page came to nothing.
+    if (entry.role === "web" && !/^(https?|data):/.test(entry.id)) void this.siteIcon(id, entry);
+  }
+
+  // --- Protected video (Widevine) -------------------------------------------
+  //
+  // The services' Chromium fetches its Widevine module in the background, a
+  // few minutes after its first start, and again when Google has a newer
+  // one. Chromium on Linux loads the module only as it starts (box.ts,
+  // widevineHint), so on a new TV every app said its video's protection
+  // wasn't supported until the TV restarted. Now the services' Chromium
+  // starts again once a module it hasn't loaded is there: at once when
+  // nobody's using it, or else as soon as someone goes home or opens an app.
+  // Its sign-ins are saved in its profile, so nobody signs in again.
+
+  // The hint changed (box.ts, WidevineWatch).
+  widevineChanged(hint: string | null): void {
+    if (!hint || !this.apps.has("web") || hint === this.servicesModule) return;
+    if (!this.servicesStale) this.log(`a new widevine module is in (${hint}); the services' chromium starts again once it's not in use`);
+    this.servicesStale = true;
+    void this.queue(async () => {
+      if (this.servicesStale && this.servicesIdle()) await this.restartServices("nothing of it was in front");
+    });
+  }
+
+  // The services' Chromium is about to start: what it will load.
+  private async servicesStarting(): Promise<void> {
+    this.servicesStale = false;
+    this.servicesModule = this.widevine ? await this.widevine().catch(() => null) : null;
+  }
+
+  // Nobody's using the services' Chromium: home or a game in front, no
+  // ambient screen over an app, no sign-in, and no web game left running
+  // under home, which closing it would end. Not while the TV is off either:
+  // the apps it paused stay as they were until the TV's been off for
+  // tvOffCloseMs (offTooLong), so a TV that's back on sooner finds them.
+  private servicesIdle(): boolean {
+    const front = this.front();
+    if (this.tvOff || this.ambient || this.signingIn || (front && front.role !== "home" && front.role !== "game")) return false;
+    return this.servicesRestartable();
+  }
+
+  // No web game would end with it, besides the one about to open.
+  private servicesRestartable(opening = ""): boolean {
+    return !this.opens.some((o) => o.role === "web" && o.game && o.id !== opening);
+  }
+
+  // Ends the services' Chromium and forgets its apps, so the next one opened
+  // starts it again with the newest module. An app that was open behind home
+  // opens again from its start.
+  private async restartServices(why: string): Promise<void> {
+    const app = this.apps.get("web");
+    this.servicesStale = false;
+    if (!app) return;
+    this.log(`closing the services' chromium for its new widevine module (${why})`);
+    if (this.signingIn) await this.endSignIn("protected video needed a restart");
+    for (const entry of this.opens.filter((o) => o.role === "web")) this.playback?.closed(entry.id);
+    this.opens = this.opens.filter((o) => o.role !== "web");
+    const ended = new Promise<boolean>((resolve) => app.onExit(() => resolve(true)));
+    app.stop();
+    if (!(await Promise.race([ended, sleep(this.servicesExitMs).then(() => false)]))) {
+      this.log(`the services' chromium didn't end in ${Math.round(this.servicesExitMs / 1000)} s; it gets the new module next time it starts`);
+    }
+    if (this.apps.get("web") === app) this.apps.delete("web");
+    this.running();
   }
 
   // Runs PAUSE or RESUME in an app's page. 0 when it can't: a page the
@@ -2197,8 +2283,15 @@ export class Screen {
     if (!/^(https?|data):/.test(url)) {
       return Promise.resolve({ ok: false, error: "only http, https and data URLs open on the TV" });
     }
-    if (this.opens.some((o) => o.id === id && o.address && this.windows.has(o.address))) return this.reopen(id);
+    if (!this.servicesStale && this.opens.some((o) => o.id === id && o.address && this.windows.has(o.address))) return this.reopen(id);
     return this.queue(async () => {
+      // A newer Widevine came while the services' Chromium ran: it starts
+      // again first, so this app plays protected video. Not under a game.
+      if (this.servicesStale && this.servicesRestartable(id)) await this.restartServices(`${id} is opening`);
+      if (this.opens.some((o) => o.id === id && o.address && this.windows.has(o.address))) {
+        await this.reopenNow(id);
+        return;
+      }
       this.opens = this.opens.filter((o) => o.id !== id);
       const entry: Open = { id, role: "web", usedAt: this.now(), paused: false, ...(game ? { game: true } : {}) };
       this.opens.push(entry);
@@ -2209,6 +2302,8 @@ export class Screen {
         if (entry.target) void this.remotePage(running.cdp, entry.target);
       }
       if (!entry.target) {
+        // The module this Chromium will load, read before it starts.
+        if (!running) await this.servicesStarting();
         const app = this.launcher.web(url);
         if (!running) {
           this.apps.set("web", app);
@@ -3585,6 +3680,7 @@ async function main(): Promise<void> {
     signIn: signInWatch(),
     profiles: serviceProfiles(),
     fitted: () => display.fitted(),
+    widevine: () => widevineHint(SERVICES_PROFILE),
   });
   refit = () => void screen.refit().catch((error: Error) => console.log(`placing the app in front again: ${error.message}`));
   woken = () => void screen.look("the box woke from sleep");
@@ -3667,7 +3763,8 @@ async function main(): Promise<void> {
   // Every theme Omarchy has, the person's own included, for Look (ADR-048).
   void omarchyThemes().start();
   // Which Widevine the services' Chromium has, for the box check (ADR-061).
-  new WidevineWatch({ home: HOME_URL, profile: SERVICES_PROFILE, log: (line) => console.log(line) }).start();
+  // And when a new module comes, the services' Chromium starts again to use it.
+  new WidevineWatch({ home: HOME_URL, profile: SERVICES_PROFILE, log: (line) => console.log(line), hinted: (hint) => screen.widevineChanged(hint) }).start();
   // When Hyprland goes, so does the TV session, and this with it.
   await screen.start(() => {
     console.log("Hyprland went away; stopping");

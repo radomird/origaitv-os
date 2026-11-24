@@ -1272,6 +1272,30 @@
   font-weight: 700;
 }
 
+/* The bar is one line: the step and the clock keep their room, and what's
+   going on takes what's left, cut short if it must. */
+.bar.counted .bar-left {
+  flex: none;
+  white-space: nowrap;
+}
+
+.bar.counted .bar-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.bar.counted .bar-info {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bar.counted .bar-clock {
+  flex: none;
+}
+
 body.counted .player {
   left: 80px;
   bottom: 144px;
@@ -1415,8 +1439,8 @@ body.counted .player-note {
 
 .setup-look-stage {
   position: relative;
-  width: 1114px;
-  height: 626px;
+  width: 1000px;
+  height: 563px;
   outline: 2px solid var(--selection);
   background: var(--background);
 }
@@ -1665,10 +1689,12 @@ body.counted .player-note {
 
 /* Theme and background on one screen, with setup's own switch on: home in
    each theme along the top, and the backgrounds under it. */
+/* Each theme card has 14 px round its picture, so the focus box sits clear
+   of it, and the pictures stay 32 px apart and in line with the headline. */
 .setup-page.d3.theme2 .tb-themes {
   display: flex;
-  gap: 32px;
-  margin: 40px -16px 0;
+  gap: 4px;
+  margin: 26px -30px 0;
   padding: 16px;
   overflow-x: auto;
   scrollbar-width: none;
@@ -1685,6 +1711,10 @@ body.counted .player-note {
   background: none;
   color: var(--bright-foreground);
   text-align: left;
+}
+
+.tb-theme {
+  padding: 14px;
 }
 
 .tb-theme-name {
@@ -1705,7 +1735,7 @@ body.counted .player-note {
 }
 
 .tb-label {
-  margin-top: 24px;
+  margin-top: 10px;
   font-size: 26px;
   color: var(--foreground);
 }
@@ -1793,4 +1823,50 @@ body.counted .player-note {
 
 .setup-fit .fit-controls {
   margin-top: 8px;
+}
+
+/* What's on your network, in setup's apps step, with setup's own switch on:
+   the headline and how the looking goes, the finds, and the two choices in
+   a row under them. */
+.setup-page.d3.servers2 .found {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 960px;
+  margin-top: 48px;
+}
+
+.setup-page.d3.servers2 .setup-actions {
+  margin-top: 16px;
+}
+
+.setup-page.d3.servers2 .found-list:has(.found-rows:empty) {
+  display: none;
+}
+
+/* A profile's page with setup's own switch on: the form on the left, and
+   Add and Remove beside it, so nothing reaches the soundtrack's player. */
+.setup-page.d3.person2 {
+  gap: 40px;
+}
+
+.setup-page.d3.person2 .person-form {
+  display: grid;
+  grid-template-columns: 960px auto;
+  column-gap: 40px;
+  align-items: start;
+  width: auto;
+}
+
+.setup-page.d3.person2 .person-form > :not(.person-actions) {
+  grid-column: 1;
+}
+
+.setup-page.d3.person2 .person-actions {
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  justify-self: start;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 280px;
 }
