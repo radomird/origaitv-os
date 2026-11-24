@@ -14,7 +14,7 @@ import { after, before, test } from "node:test";
 import { x25519Pair } from "../../../daemon/phone-channel.ts";
 import { Phones } from "../../../daemon/phones.ts";
 import { Daemon } from "../../../daemon/server.ts";
-import { pairPhone } from "./phone-client.mts";
+import { pairFromTv, pairPhone } from "./phone-client.mts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const dir = mkdtempSync(join(tmpdir(), "origaitv-stick-pairing-"));
@@ -281,4 +281,35 @@ test("T30.2 a wall clock set back after a restart doesn't give the secret its da
   now.sinceBootMs += 5 * HOUR;
   now.wallMs += 5 * HOUR;
   assert.equal(phones().waitingForStick(), false);
+});
+
+test("on a TV with no cable, the pairing the stick's link replaces is forgotten through and through: its open session ends too", async () => {
+  // A daemon whose own Wi-Fi is this machine's loopback, so a phone on the
+  // phones' port counts as one on the TV's own Wi-Fi.
+  const state = join(dir, "state-hotspot");
+  mkdirSync(state, { recursive: true });
+  const linkSecret = randomBytes(16);
+  writeFileSync(join(state, "stick-pairing.json"), JSON.stringify({ secret: b64u(linkSecret), wait: false }), { mode: 0o600 });
+  const other = new Daemon({ root: ROOT, state, builtins: null, port: 0, log: () => {}, running: "0.3.0-1", lanPort: 0, lanHost: "127.0.0.1", address: () => "192.168.1.20", hotspotAddress: "127.0.0.1", phoneWaitMs: 400 });
+  try {
+    const otherTv = `http://127.0.0.1:${await other.listen()}`;
+    const otherPhone = `http://127.0.0.1:${other.lanPort}`;
+    // In the sheet for Wi-Fi sign-ins, with the TV's code, during setup.
+    const sheet = await pairFromTv(otherTv, otherPhone, "iPhone");
+    assert.equal((await sheet.fetch("/api/phone/state")).status, 200);
+    // Then the same iPhone from the stick's link in its own browser.
+    const linked = await pairPhone(otherPhone, { secret: b64u(linkSecret) }, "iPhone");
+    assert.equal((await linked.fetch("/api/phone/state")).status, 200);
+    const listed = (await (await fetch(`${otherTv}/api/phones`)).json()) as { phones: { id: string }[] };
+    assert.deepEqual(listed.phones.map((p) => p.id), [linked.kept.id], "listed once");
+    // The sheet's session went with its pairing, straight away, as when a
+    // phone is forgotten in Settings, not at its next request.
+    const sessions = (other as unknown as { phoneChannel: { sessions: Map<string, { phone: string }> } }).phoneChannel.sessions;
+    assert.ok(![...sessions.values()].some((session) => session.phone === sheet.kept.id), "the replaced pairing's session is gone");
+    assert.ok([...sessions.values()].some((session) => session.phone === linked.kept.id));
+    const after = await sheet.fetch("/api/phone/state").then((r) => r.status, () => 401);
+    assert.notEqual(after, 200);
+  } finally {
+    await other.close();
+  }
 });

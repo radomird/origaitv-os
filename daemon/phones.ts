@@ -267,7 +267,11 @@ export class Phones {
   // an iPhone. Later it opens the stick's link in its own browser and pairs
   // again. That pairing takes the place of the first, by the same name, so
   // the TV lists the phone once.
-  pair(request: PairRequest | undefined, boxId?: string, stick = false, overHotspot = false): Paired | { error: string } {
+  //
+  // The answer says which phone that was, in `replaces`, for the daemon to
+  // forget its session and pads as it does any forgotten phone's. It's never
+  // sent to the phone.
+  pair(request: PairRequest | undefined, boxId?: string, stick = false, overHotspot = false): (Paired & { replaces?: string }) | { error: string } {
     const live = this.pending && this.pending.until > this.now() ? this.pending : null;
     if (!stick && this.handedPath) this.dropStick();
     const stickPhone = stick ? this.readHanded() : null;
@@ -304,16 +308,18 @@ export class Phones {
     const name = request?.name;
     const label = (typeof name === "string" && name.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, NAME_MAX)) || "a phone";
     const phone: Phone = { id: `p-${this.random(4).toString("hex")}`, name: label, pairedAt: new Date(this.now()).toISOString() };
+    // Only a pairing marked as made by code over the TV's own Wi-Fi during
+    // setup is ever replaced. Two of those with the same name can't be told
+    // apart, so it's the latest.
+    const first = byStick ? this.read().filter((p) => p.setupHotspot && p.name === label).pop() : undefined;
+    if (first) this.forget(first.id);
     let phones = this.read();
-    if (byStick) {
-      const first = phones.filter((p) => p.setupHotspot && p.name === label).pop();
-      if (first) phones = phones.filter((p) => p !== first);
-      phones = phones.map(({ setupHotspot: _setup, ...p }) => p);
-    }
+    if (byStick) phones = phones.map(({ setupHotspot: _setup, ...p }) => p);
     const mark = !byStick && overHotspot && stickPhone?.wait === false ? { setupHotspot: true as const } : {};
     this.write([...phones, { ...phone, key: key.toString("base64"), ...mark }]);
-    if (boxId === undefined) return { id: phone.id, key: b64u(ours.public), confirm: b64u(hmac(key, INFO.pairBox, theirs, ours.public)), phone };
-    return { id: phone.id, key: b64u(ours.public), confirm: b64u(hmac(key, INFO.pairBoxId, theirs, ours.public, boxId)), phone, boxId };
+    const replaces = first ? { replaces: first.id } : {};
+    if (boxId === undefined) return { id: phone.id, key: b64u(ours.public), confirm: b64u(hmac(key, INFO.pairBox, theirs, ours.public)), phone, ...replaces };
+    return { id: phone.id, key: b64u(ours.public), confirm: b64u(hmac(key, INFO.pairBoxId, theirs, ours.public, boxId)), phone, boxId, ...replaces };
   }
 
   // A paired phone and its key, by its id, or null.
