@@ -138,7 +138,7 @@ test("Q341 while the plan's limits are paused, AI shows the numbers it last read
     await go(page, "settings/ai");
     await page.waitForSelector('.settings-panel[data-page="ai"] .plan-age');
     await rest(page);
-    await page.waitForTimeout(300);
+    await settled(page);
     assert.equal((await page.locator('[data-action="plan-hours"]').innerText()).replace(/\s+/g, " ").trim(), "5-hour limit 23%");
     assert.equal(await page.locator(".settings-panel .plan-age").innerText(), "As of 8 hours ago");
     assert.deepEqual(await shortfalls(page), []);
