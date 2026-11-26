@@ -55,6 +55,19 @@ async function layout(): Promise<Record<string, string>> {
   return Object.fromEntries(tiles.map((t) => [t.id, `${t.size}@${t.x},${t.y}`]));
 }
 
+// A tile's size and place once the daemon has kept what a press changed. A
+// press is saved a moment after it's drawn, later on a busy machine, so this
+// looks for up to three seconds before it gives what's there.
+async function laid(id: string, want: string): Promise<string> {
+  const end = Date.now() + 3000;
+  let now = (await layout())[id];
+  while (now !== want && Date.now() < end) {
+    await new Promise((done) => setTimeout(done, 50));
+    now = (await layout())[id];
+  }
+  return now;
+}
+
 async function setLayout(tiles: { id: string; x: number; y: number; size: string }[]): Promise<void> {
   const response = await fetch(`${url}/api/layout`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layout: tiles }) });
   assert.equal(response.status, 200, await response.text());
@@ -209,20 +222,18 @@ test("S2.5 + and - step only through the sizes an app lists", async () => {
   // My TV comes small and medium.
   await tile(page, "local.mytv").hover();
   await page.keyboard.press("+");
-  await page.waitForTimeout(150);
-  assert.equal((await layout())["local.mytv"], "m@2,0");
+  assert.equal(await laid("local.mytv", "m@2,0"), "m@2,0");
   await page.keyboard.press("+");
   await page.waitForTimeout(150);
   assert.equal((await layout())["local.mytv"], "m@2,0");
   await page.keyboard.press("-");
-  await page.waitForTimeout(150);
-  assert.equal((await layout())["local.mytv"], "s@2,0");
+  assert.equal(await laid("local.mytv", "s@2,0"), "s@2,0");
   // Sample comes in all three.
   await tile(page, "origaitv.sample").hover();
   await page.keyboard.press("+");
+  assert.equal(await laid("origaitv.sample", "m@0,0"), "m@0,0");
   await page.keyboard.press("+");
-  await page.waitForTimeout(200);
-  assert.equal((await layout())["origaitv.sample"], "l@0,0");
+  assert.equal(await laid("origaitv.sample", "l@0,0"), "l@0,0");
   await page.close();
 });
 
