@@ -483,11 +483,11 @@ export class Home {
       const fields = (manifest.tv.setup ?? []).filter((step) => step.type === "field");
       const signedIn = signIns[manifest.id]?.signedIn;
       const signInStep = (manifest.tv.setup ?? []).some((step) => step.type === "signIn");
-      // The icon its page gave once it was open on this TV, or else its
-      // package's own, or its installed package's or its site's. The page's
-      // gets a version in its address, so a page that drew the package's
-      // draws it again.
-      const fromPage = builtin || manifest.tv.runtime !== "web" ? null : this.pageIconAt(manifest.id);
+      // Its package's own icon when it brings one, which nothing takes the
+      // place of. Or else the icon its page gave once it was open on this
+      // TV, or its installed package's or its site's. The page's gets a
+      // version in its address, so a page that drew letters draws it.
+      const fromPage = builtin || manifest.tv.icon || manifest.tv.runtime !== "web" ? null : this.pageIconAt(manifest.id);
       const has = !!fromPage || !!manifest.tv.icon || (manifest.tv.runtime === "native" ? packageIcon({ ...manifest.tv, name: manifest.name }, this.dataDirs) !== null : this.hasSiteIcon(manifest.id, tier));
       const icon = has ? `/api/apps/${manifest.id}/icon${fromPage ? `?v=${encodeURIComponent(fromPage)}` : ""}` : undefined;
       const reach = [...allowedOrigins(manifest, values, this.onBox({ thisBox }))].map((origin) => origin.replace(/^https?:\/\//, ""));
@@ -869,16 +869,17 @@ export class Home {
     }
   }
 
-  // An app's logo: the one its page gave on this TV, else its package's
-  // own, else its installed package's or its site's, kept here.
+  // An app's logo: its package's own when it brings one, even on a TV that
+  // kept its page's before. Else the one its page gave on this TV, else its
+  // installed package's or its site's, kept here.
   async icon(id: string): Promise<{ path: string; type?: string } | null> {
     const found = (await this.manifests()).find(({ manifest }) => manifest.id === id);
     if (!found) return null;
+    if (found.manifest.tv.icon) return { path: join(found.dir, found.manifest.tv.icon) };
     if (found.tier !== "built-in" && found.manifest.tv.runtime === "web" && this.pageIconAt(id)) {
       const kept = await readJson<{ type?: string } | null>(join(this.state, "icons", `${id}.json`), null);
       if (kept?.type) return { path: join(this.state, "icons", id), type: kept.type };
     }
-    if (found.manifest.tv.icon) return { path: join(found.dir, found.manifest.tv.icon) };
     if (found.tier === "built-in") return null;
     if (found.manifest.tv.runtime === "native") return packageIcon({ ...found.manifest.tv, name: found.manifest.name }, this.dataDirs);
     const site = await readJson<{ type?: string } | null>(join(this.state, "icons", `${id}.json`), null);
@@ -887,13 +888,14 @@ export class Home {
 
   // Whether a web app still wants its icon read from its own page: until
   // one is, once the app's page is open in the TV's browser. That's the
-  // site's own icon as the site shows it today, so it's kept over the one
-  // the app's package brings, and over one the daemon fetched (or couldn't:
-  // some sites refuse anything that isn't a browser). The screen daemon
-  // asks.
+  // site's own icon as the site shows it today, so it's kept over one the
+  // daemon fetched (or couldn't: some sites refuse anything that isn't a
+  // browser). An app whose package brings its own icon never wants it: a
+  // site's icon is made for a browser's tab, not for a tile. The screen
+  // daemon asks.
   async siteIconWanted(id: string): Promise<boolean> {
     const found = (await this.manifests()).find(({ manifest }) => manifest.id === id);
-    if (!found || found.tier === "built-in" || found.manifest.tv.runtime !== "web") return false;
+    if (!found || found.tier === "built-in" || found.manifest.tv.runtime !== "web" || found.manifest.tv.icon) return false;
     return this.pageIconAt(id) === null;
   }
 

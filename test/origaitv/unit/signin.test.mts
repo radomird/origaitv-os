@@ -4,7 +4,7 @@
 // site's own icon fetched on the box for an app with none (daemon/site-icon.ts).
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -290,7 +290,7 @@ test("T30.10 a site that refuses the daemon gets its icon from its page on the T
   }
 });
 
-test("T30.10 a web app's packaged icon shows from the start, and the one read from its page on the TV takes its place, once", async () => {
+test("a web app's packaged icon shows from the start and stays, even on a TV that kept its page's icon before", async () => {
   const { apps, state } = makeBox([
     {
       id: "local.packaged",
@@ -312,14 +312,20 @@ test("T30.10 a web app's packaged icon shows from the start, and the one read fr
     const before = (await home.apps()).find((app) => app.id === "local.packaged");
     assert.equal(before?.icon, "/api/apps/local.packaged/icon", "its package's icon, never letters");
     assert.equal((await home.icon("local.packaged"))?.path.endsWith(".svg"), true, "the file in its package");
-    assert.equal(await home.siteIconWanted("local.packaged"), true, "its page's icon is still wanted");
-    assert.equal(await home.keepSiteIcon("local.packaged", { type: "image/png", data: PNG.toString("base64"), from: `${base}/logo.png` }), null);
+    assert.equal(await home.siteIconWanted("local.packaged"), false, "its page's icon isn't wanted");
+    assert.equal(await home.keepSiteIcon("local.packaged", { type: "image/png", data: PNG.toString("base64"), from: `${base}/logo.png` }), "that app doesn't need its site's icon");
+    assert.equal(existsSync(join(state, "icons", "local.packaged")), false, "and nothing was kept");
+    // A TV that read the page's icon before this: the file is still there,
+    // and the package's own is what's shown.
+    mkdirSync(join(state, "icons"), { recursive: true });
+    writeFileSync(join(state, "icons", "local.packaged"), PNG);
+    writeFileSync(join(state, "icons", "local.packaged.json"), JSON.stringify({ type: "image/png", from: `${base}/logo.png`, by: "page", at: "2026-11-24T10:00:00.000Z" }));
     const after = (await home.apps()).find((app) => app.id === "local.packaged");
-    assert.match(after?.icon ?? "", /^\/api\/apps\/local\.packaged\/icon\?v=/, "a new address, so home draws it again");
-    const kept = await home.icon("local.packaged");
-    assert.equal(kept?.type, "image/png");
-    assert.ok(readFileSync(kept!.path).equals(PNG), "the page's, not the package's");
-    assert.equal(await home.siteIconWanted("local.packaged"), false, "and once is enough");
+    assert.equal(after?.icon, "/api/apps/local.packaged/icon", "the same address, with no version");
+    const shown = await home.icon("local.packaged");
+    assert.equal(shown?.path.endsWith(".svg"), true, "the package's, not the page's");
+    assert.equal(shown?.type, undefined);
+    assert.equal(await home.siteIconWanted("local.packaged"), false);
   } finally {
     home.stop();
   }
