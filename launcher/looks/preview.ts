@@ -29,6 +29,10 @@ export function previewFrame(look: LookId, size: SizeId, width: number | null, t
   });
   const box = h("span", { class: `look-frame${width === null ? " fill" : ""}` }, frame);
   if (width === null) {
+    // Nothing shows until the width is known. Without this the page is drawn
+    // for a frame at the scale for a 300 px card, which is too big for a
+    // narrower one and spills over its frame.
+    box.style.setProperty("--preview-scale", "0");
     // The width inside its border, unrounded and before the page's zoom.
     new ResizeObserver(([seen]) => box.style.setProperty("--preview-scale", String(seen.contentBoxSize[0].inlineSize / canvas.width))).observe(box);
     return box;

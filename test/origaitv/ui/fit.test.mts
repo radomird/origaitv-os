@@ -83,6 +83,16 @@ const display = async () => (await (await fetch(`${url}/api/display`)).json()) a
 // The margin the TV has kept, once the last step's save has landed: the
 // page shows each step at once, and saves the last one after the one
 // that's out.
+// The last reserved area the stand-in screen daemon was asked for, once it's
+// the one a step sends. The daemon keeps the margin first and the stand-in
+// picks the ask up on its next turn, so right after the margin is kept the
+// last ask can still be the step before's. This waits up to five seconds.
+async function asked(x: number, y: number): Promise<[number, number] | undefined> {
+  const end = Date.now() + 5000;
+  while (JSON.stringify(reserved.at(-1)) !== JSON.stringify([x, y]) && Date.now() < end) await new Promise((done) => setTimeout(done, 50));
+  return reserved.at(-1);
+}
+
 async function kept(margin: number): Promise<number> {
   const end = Date.now() + 5000;
   let now = (await display()).margin;
@@ -170,7 +180,7 @@ for (const look of LOOKS) {
         await page.keyboard.press("ArrowLeft");
         await page.waitForFunction(() => document.querySelector(".fit-value")?.textContent === "92%");
         assert.equal(await kept(4), 4);
-        assert.deepEqual(reserved.at(-1), [77, 43], "the screen daemon is asked for the new margin");
+        assert.deepEqual(await asked(77, 43), [77, 43], "the screen daemon is asked for the new margin");
         assert.deepEqual(await marksAt(page, 77, 43), everyMark(77, 43));
         // Bigger, all the way: no margin at all, and no further.
         for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
