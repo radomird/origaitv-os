@@ -15,9 +15,9 @@ image="$ROOT/.github/workflows/image.yml"
 # The lines of image.yml that say what an edge package's version looks
 # like, one for each job that names an ISO.
 tests=()
+# shellcheck disable=SC2016 # the single quotes hold sed, not shell
 while IFS= read -r line; do
   tests+=("$line")
-# shellcheck disable=SC2016 # the single quotes hold sed, not shell
 done < <(sed -nE 's/^ *if (\[\[ \$version =~ .* \]\]); then$/\1/p' "$image")
 (( ${#tests[@]} == 2 )) || fail "image.yml names the edge ISO in two jobs" "found ${#tests[@]}"
 [[ ${tests[0]} == "${tests[1]}" ]] || fail "both jobs read an edge version the same way" "$(printf '%s\n' "${tests[@]}")"
