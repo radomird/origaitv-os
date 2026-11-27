@@ -626,7 +626,9 @@ jobs:
             package=$(find iso/configs/airootfs/usr/share/origaitv-iso/packages -maxdepth 1 -name 'origaitv-[0-9]*-any.pkg.tar.zst' | head -n 1)
             version=${package##*/origaitv-}
             version=${version%-*-any.pkg.tar.zst}
-            if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+\.r[0-9]+\.g[0-9a-f]+$ ]]; then
+            # 1.0.0rc6.r12.gabc1234 after a candidate, 1.0.0.r3.gabc1234
+            # after a release.
+            if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[1-9][0-9]*)?\.r[0-9]+\.g[0-9a-f]+$ ]]; then
               name="origaitv-$version-x86_64"
             fi
           fi
@@ -1244,7 +1246,9 @@ jobs:
             package=$(find iso/configs/airootfs/usr/share/origaitv-iso/packages -maxdepth 1 -name 'origaitv-[0-9]*-any.pkg.tar.zst' | head -n 1)
             version=${package##*/origaitv-}
             version=${version%-*-any.pkg.tar.zst}
-            if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+\.r[0-9]+\.g[0-9a-f]+$ ]]; then
+            # 1.0.0rc6.r12.gabc1234 after a candidate, 1.0.0.r3.gabc1234
+            # after a release.
+            if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[1-9][0-9]*)?\.r[0-9]+\.g[0-9a-f]+$ ]]; then
               name="origaitv-$version-x86_64"
             fi
           fi

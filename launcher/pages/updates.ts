@@ -17,7 +17,7 @@ export function shown(version: string | null | undefined): string {
 }
 
 // A release's number is worth showing on the Updating screen. An early
-// update's is a package version (0.2.0.r479.g7b931248a), which tells a person
+// update's is a package version (1.0.0rc6.r12.g7b931248a), which tells a person
 // nothing, so that screen leaves it off.
 function releaseNumber(version: string | null | undefined): string | null {
   const v = shown(version);

@@ -52,8 +52,13 @@ const why = (r: SetupInfo["setup"]["ready"]): UpdateWhy => r.why ?? "unchanged";
 
 // A version without pacman's release, to compare.
 const bare = (version: string | null) => (version ?? "").replace(/-\d+$/, "");
-// A version as people read it: no package release or build after it.
-const shown = (version: string | null) => bare(version).replace(/\.r\d+\.g[0-9a-f]+$/, "");
+// A version as people read it: no package release or build after it, and a
+// build that counts from a candidate (1.0.0rc6.r12.gabc1234) written the way
+// the candidate is, 1.0.0-rc6.
+const shown = (version: string | null) =>
+  bare(version)
+    .replace(/\.r\d+\.g[0-9a-f]+$/, "")
+    .replace(/^(\d+\.\d+\.\d+)(rc\d+)$/, "$1-$2");
 
 // Two versions as people read them, or as they are when that would look the
 // same, as on edge, or for a package built again.

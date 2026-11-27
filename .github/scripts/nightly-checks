@@ -18,7 +18,7 @@
 # package, it's origaitv-iso's origaitv.
 #
 # Usage: .github/scripts/nightly-checks <version> <origaitv-os> <origaitv-iso>
-#   version     the origaitv package on edge, like 0.2.0.r389.g0bab19ed7
+#   version     the origaitv package on edge, like 1.0.0rc6.r12.g0bab19ed7
 #   origaitv-os   and origaitv-iso: anything git clones, each with an origaitv branch
 #
 # Writes to $GITHUB_OUTPUT (or stdout): built (the origaitv-os commit the
@@ -27,7 +27,7 @@
 
 set -euo pipefail
 
-version=${1:?the origaitv package version on edge, like 0.2.0.r389.g0bab19ed7}
+version=${1:?the origaitv package version on edge, like 1.0.0rc6.r12.g0bab19ed7}
 os_url=${2:?origaitv-os to clone}
 iso_url=${3:?origaitv-iso to clone}
 out=${GITHUB_OUTPUT:-/dev/stdout}

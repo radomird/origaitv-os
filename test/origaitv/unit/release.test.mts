@@ -29,6 +29,26 @@ test("T30.3 a release's version is plain, a candidate's has its rc, and a build'
   }
 });
 
+// Edge counts from the last release or candidate, so a build is named after
+// one: 1.0.0rc6.r12 is twelve commits after 1.0.0-rc6.
+test("T30.3 an edge build named after a candidate or a release is still a build, never a release", () => {
+  for (const version of ["1.0.0rc6.r0.g8880c58c5", "1.0.0rc6.r12.g91b63a2e0", "1.0.0rc10.r0.g91b63a2e0", "1.0.0.r0.g91b63a2e0", "1.0.0.r3.g91b63a2e0", "1.0.1rc1.r0.g91b63a2e0", "1.0.0rc6"]) {
+    assert.equal(isRelease(version), false, version);
+  }
+});
+
+test("T30.3 the 1.0.0-rc7 ISO carries a build named after rc6, and the TV runs 1.0.0-rc7 until edge moves it on", () => {
+  const rc7 = { release: "1.0.0-rc7", build: "1.0.0rc6.r12.g91b63a2e0" };
+  assert.deepEqual(running("1.0.0rc6.r12.g91b63a2e0", rc7), { release: "1.0.0-rc7", installedFrom: "1.0.0-rc7" });
+  assert.deepEqual(running("1.0.0rc7.r2.g0c4f00d1e", rc7), { release: null, installedFrom: "1.0.0-rc7" });
+  // A box from before, updated from a 0.2.0 build to one named after rc6.
+  assert.deepEqual(running("1.0.0rc6.r0.g8880c58c5", { release: "1.0.0-rc6", build: "0.2.0.r1157.g8880c58c5" }), { release: null, installedFrom: "1.0.0-rc6" });
+  // On stable, 1.0.0 itself.
+  assert.deepEqual(running("1.0.0", rc7), { release: "1.0.0", installedFrom: "1.0.0-rc7" });
+  // With no ISO's file, it has no release, only its build.
+  assert.deepEqual(running("1.0.0rc6.r12.g91b63a2e0", { release: "", build: "" }), { release: null, installedFrom: null });
+});
+
 const RC4 = { release: "1.0.0-rc4", build: "0.2.0.r1061.g91b63a2e0" };
 
 test("T30.3 an edge box still on the build the 1.0.0-rc4 ISO carried runs 1.0.0-rc4", () => {
@@ -123,4 +143,13 @@ test("T30.3 origaitv version says the release, then edge, installed from it, and
   assert.equal(version(edge("0.2.0.r1072.g0c4f00d1e"), "1.0.0-rc4\n"), "OrigaiTV 0.2.0.r1072.g0c4f00d1e (edge)\nRelease 1.0.0-rc4");
   assert.equal(version(edge("0.2.0.r1061.g91b63a2e0"), null), "OrigaiTV 0.2.0.r1061.g91b63a2e0 (edge)");
   assert.equal(version("ORIGAITV_VERSION=1.0.0\nORIGAITV_CHANNEL=stable\n", rc4), "OrigaiTV 1.0.0 (stable)");
+});
+
+test("T30.3 origaitv version says the same for a build named after a candidate", () => {
+  const edge = (build: string) => `ORIGAITV_VERSION=${build}\nORIGAITV_CHANNEL=edge\n`;
+  const rc7 = "1.0.0-rc7\n1.0.0rc6.r12.g91b63a2e0\n";
+  assert.equal(version(edge("1.0.0rc6.r12.g91b63a2e0"), rc7), "OrigaiTV 1.0.0rc6.r12.g91b63a2e0 (edge)\nRelease 1.0.0-rc7");
+  assert.equal(version(edge("1.0.0rc7.r2.g0c4f00d1e"), rc7), "OrigaiTV 1.0.0rc7.r2.g0c4f00d1e (edge)\nEdge channel, installed from 1.0.0-rc7");
+  assert.equal(version(edge("1.0.0.r0.g0c4f00d1e"), rc7), "OrigaiTV 1.0.0.r0.g0c4f00d1e (edge)\nEdge channel, installed from 1.0.0-rc7");
+  assert.equal(version(edge("1.0.0rc6.r12.g91b63a2e0"), null), "OrigaiTV 1.0.0rc6.r12.g91b63a2e0 (edge)");
 });

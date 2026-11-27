@@ -2,7 +2,9 @@
 //
 // A release's version is plain: 1.0.0, or 1.0.0-rc4 for a candidate. The
 // package says it on stable, where each update is a release. An edge build
-// says where it was made instead, like 0.2.0.r1061.g91b63a2e0. So the ISO
+// says where it was made instead: 1.0.0rc6.r12.g91b63a2e0 is twelve commits
+// after 1.0.0-rc6, with the candidate written rc6, no hyphen, since a
+// package's version can't have one. That's a build, never a release. So the ISO
 // writes what it installed to /etc/origaitv/release: the release on its first
 // line, and the build it carried on its second. While the box still runs
 // that build, it runs that release. Once an update on edge moves it past
