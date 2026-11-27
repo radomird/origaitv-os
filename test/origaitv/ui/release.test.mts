@@ -146,6 +146,22 @@ test("T30.3 a stable TV says its release, and no build", async () => {
   await page.close();
 });
 
+test("an edge TV with no release, on a build that counts from a candidate, names the candidate the way it's written", async () => {
+  const build = "1.0.0rc6.r12.g91b63a2e0";
+  const page = await tv(await box(build, "edge"), "glass");
+  assert.deepEqual(await system(page), { about: "OrigaiTV 1.0.0-rc6", build: `Build ${build}` });
+  assert.deepEqual(await about(page), { big: "OrigaiTV 1.0.0-rc6", build: `Build ${build}` });
+  await page.close();
+});
+
+test("T30.3 the 1.0.0-rc7 ISO's TV says 1.0.0-rc7, with the build named after rc6 under it", async () => {
+  const build = "1.0.0rc6.r12.g91b63a2e0";
+  const page = await tv(await box(build, "edge", `1.0.0-rc7\n${build}\n`), "terminal");
+  assert.deepEqual(await system(page), { about: "OrigaiTV 1.0.0-rc7", build: `Build ${build}` });
+  await fits(page);
+  await page.close();
+});
+
 test("an edge TV with no release says its build, as it did before", async () => {
   const page = await tv(await box(BUILD, "edge"), "glass");
   assert.deepEqual(await system(page), { about: "OrigaiTV 0.2.0", build: `Build ${BUILD}` });

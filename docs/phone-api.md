@@ -49,7 +49,7 @@ The TV publishes one DNS-SD service over mDNS, through Avahi:
 | Name | The TV's name: `OrigaiTV` until somebody names it, then whatever they typed, such as `Living room`. See [The TV's name](#the-tvs-name). |
 | Port | The phones' port, 3001 |
 | TXT `id` | The box id: 32 lower-case hex digits |
-| TXT `version` | The OrigaiTV version that's installed, such as `1.0.0` or `1.0.0.r12.gabc1234` |
+| TXT `version` | The OrigaiTV version that's installed, such as `1.0.0`, `1.0.0.r12.gabc1234` or, after a candidate, `1.0.0rc6.r12.gabc1234` |
 
 That's all of it. The record is on IPv4 only, because the phones' port answers on IPv4.
 

@@ -110,8 +110,14 @@ let pushEl: HTMLElement | null = null;
 // is showing.
 const FOLLOW: Record<Tv["view"], Mode | null> = { remote: "remote", keyboard: "type", playback: "play", trackpad: "mouse", pin: null };
 
-// A version as people read it: no package release or build after it.
-const shown = (version: string) => version.replace(/\.r\d+\.g[0-9a-f]+/, "").replace(/-\d+$/, "");
+// A version as people read it: no package release or build after it, and a
+// build that counts from a candidate (1.0.0rc6.r12.gabc1234) written the way
+// the candidate is, 1.0.0-rc6.
+const shown = (version: string) =>
+  version
+    .replace(/\.r\d+\.g[0-9a-f]+/, "")
+    .replace(/-\d+$/, "")
+    .replace(/^(\d+\.\d+\.\d+)(rc\d+)$/, "$1-$2");
 
 // What the phone is called on the TV's list.
 function phoneName(): string {

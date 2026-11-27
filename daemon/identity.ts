@@ -35,7 +35,7 @@ function homepage(value: (key: string) => string | undefined): string | undefine
 }
 
 // The origaitv package a process started from, as pacman has it, with its
-// release: "0.1.1.r84.g8651ebebc-1", or "dev" in a checkout. The daemon and
+// release: "1.0.0rc6.r12.g8651ebebc-1", or "dev" in a checkout. The daemon and
 // the screen daemon read it once as they start, so after an update puts a
 // newer one on disk it still says what's running until they restart.
 export function installedPackage(db = process.env.ORIGAITV_PACMAN_DB ?? "/var/lib/pacman/local"): string {

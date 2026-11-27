@@ -469,11 +469,13 @@ export function settings(ctx: Ctx, open?: string): View {
     ];
   };
 
-  const version = () => ctx.state.version.replace(/\.r\d+\.g[0-9a-f]+$/, "");
+  // A build's version without where it was made, written the way its
+  // release is: 1.0.0rc6.r12.g91b63a2e0 counts from 1.0.0-rc6.
+  const version = () => ctx.state.version.replace(/\.r\d+\.g[0-9a-f]+$/, "").replace(/^(\d+\.\d+\.\d+)(rc\d+)$/, "$1-$2");
   // What this TV runs (ADR-132): its release (OrigaiTV 1.0.0-rc4), or once
   // an update on edge has moved it past the ISO's build, the release it was
   // installed from, never just edge. With neither, its build's own version.
-  // An edge build says where it was made (0.2.0.r1061.g91b63a2e0), and that
+  // An edge build says where it was made (1.0.0rc6.r12.g91b63a2e0), and that
   // goes on a line of its own, under it.
   const release = () => ctx.state.release ?? version();
   const runs = () =>
